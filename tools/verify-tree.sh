@@ -91,15 +91,40 @@ else
         fail "device.mk produced no PRODUCT_COPY_FILES at all"
     else
         missing=0
+        dirs=0
         count=0
         for src in ${sources}; do
             count=$((count + 1))
             if [[ ! -e "${src}" ]]; then
                 fail "copy rule points at a missing file: ${src}"
                 missing=1
+            elif [[ -d "${src}" ]]; then
+                # A directory source generates `rm -f <dest> && cp <dir> <dest>`,
+                # and rm cannot unlink a directory: the build dies with
+                # "rm: <dest>: Is a directory". Expand directories into one rule
+                # per file instead.
+                fail "copy rule points at a directory, not a file: ${src}"
+                dirs=1
             fi
         done
-        [[ "${missing}" -eq 0 ]] && pass "all ${count} PRODUCT_COPY_FILES sources exist"
+        [[ "${missing}" -eq 0 && "${dirs}" -eq 0 ]] && pass "all ${count} PRODUCT_COPY_FILES sources are regular files"
+
+        # The .ta files are the reason the directory rule above exists: when the
+        # directory is populated every file in it must be copied individually.
+        ta_dir="${DEVICE_DIR}/proprietary/vendor/mitee/ta"
+        ta_count=$(find "${ta_dir}" -maxdepth 1 -name '*.ta' -type f 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "${ta_count}" -gt 0 ]]; then
+            # The harness echoes every source on a single line, so count
+            # occurrences rather than lines.
+            copied=$(grep -o "vendor/mitee/ta/" <<< "${sources}" | wc -l | tr -d ' ')
+            if [[ "${copied}" -eq "${ta_count}" ]]; then
+                pass "each of the ${ta_count} TEE trusted applications is copied individually"
+            else
+                fail "${ta_count} .ta files present but ${copied} copy rules reference them"
+            fi
+        else
+            echo "  skip  no .ta files collected yet (proprietary/vendor/mitee/ta is empty)"
+        fi
     fi
 
     # The blob/module rules are wildcard-guarded: create a dummy of each and

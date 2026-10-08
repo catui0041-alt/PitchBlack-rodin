@@ -63,15 +63,17 @@ RODIN_BLOB_REMAP := \
     vendor/etc/vintf/manifest/android.hardware.security.keymint-service.mitee.xml:recovery/root/vendor/etc/vintf/manifest/android.hardware.security.keymint-service.mitee.xml \
     vendor/etc/vintf/manifest/android.hardware.security.secureclock-service.mitee.xml:recovery/root/vendor/etc/vintf/manifest/android.hardware.security.secureclock-service.mitee.xml \
     vendor/etc/vintf/manifest/android.hardware.security.sharedsecret-service.mitee.xml:recovery/root/vendor/etc/vintf/manifest/android.hardware.security.sharedsecret-service.mitee.xml \
-    vendor/etc/vintf/manifest/android.hardware.weaver-service.nxp.xml:recovery/root/vendor/etc/vintf/manifest/android.hardware.weaver-service.nxp.xml \
-    vendor/mitee/ta:recovery/root/vendor/mitee/ta
+    vendor/etc/vintf/manifest/android.hardware.weaver-service.nxp.xml:recovery/root/vendor/etc/vintf/manifest/android.hardware.weaver-service.nxp.xml
 
 PRODUCT_COPY_FILES += $(foreach r,$(RODIN_BLOB_REMAP),\
     $(if $(wildcard $(DEVICE_PATH)/proprietary/$(firstword $(subst :, ,$(r)))),\
     $(DEVICE_PATH)/proprietary/$(firstword $(subst :, ,$(r))):$(lastword $(subst :, ,$(r)))))
 
-# The TEE trusted applications are a directory of .ta files; copy the whole
-# directory when it exists (make's wildcard cannot glob a directory tree).
+# The TEE trusted applications are a directory of .ta files. A directory must
+# never appear as a source in PRODUCT_COPY_FILES: the generated copy rule runs
+# "rm -f <dest>" first, and rm refuses to unlink a directory, so the build dies
+# with "rm: <dest>: Is a directory". Expand the directory into one rule per file
+# instead. This is also why the .ta files stay out of RODIN_BLOB_PATHS.
 RODIN_MITEE_TA_DIR := $(DEVICE_PATH)/proprietary/vendor/mitee/ta
 RODIN_MITEE_TAS := $(wildcard $(RODIN_MITEE_TA_DIR)/*.ta)
 PRODUCT_COPY_FILES += $(foreach t,$(RODIN_MITEE_TAS),$(t):recovery/root/vendor/mitee/ta/$(notdir $(t)))
