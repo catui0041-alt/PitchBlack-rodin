@@ -5,7 +5,7 @@
 من مجلد `device/xiaomi/rodin`:
 
 ```bash
-tools/extract-prebuilts.sh <مجلد يحتوي boot.img و vendor_boot.img>
+bash tools/extract-prebuilts.sh <مجلد يحتوي boot.img و vendor_boot.img>
 ```
 
 إن لم تمرّر مساراً، يُجرّب تلقائياً:
@@ -61,11 +61,17 @@ lunch pb_rodin-eng
 mka vendorbootimage
 
 # ثم التجميع النهائي (يستبدل ramdisk الـ recovery ويوقّع الصورة)
-device/xiaomi/rodin/tools/make-vendor-boot.sh
+bash device/xiaomi/rodin/tools/make-vendor-boot.sh
 ```
 
 المتطلبات: ~100 جيجا مساحة، 16 جيجا رام على الأقل + swap (استخدم
-`tools/setup-swap.sh`)، وlz4 وpython3.
+`bash tools/setup-swap.sh`)، وlz4 وpython3.
+
+> استدعِ كل سكربت عبر `bash` دائماً (كما يفعل الـ CI). الشجرة تُحرَّر من
+> الهاتف، و`/sdcard` لا يحمل بت تنفيذ أصلاً، فلا يمكن تثبيته في git من هناك؛
+> والاستدعاء المباشر (`tools/x.sh`) يفشل بـ `Permission denied` وexit 126
+> بعد نجاح البناء كاملاً. السكربتات التنفيذية محفوظة بـ mode 100755 في
+> الفهرسه (`bash tools/verify-tree.sh` يفحص ذلك).
 
 ## 4) الفلاش
 

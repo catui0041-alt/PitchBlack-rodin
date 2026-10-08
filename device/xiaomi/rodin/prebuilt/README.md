@@ -37,7 +37,7 @@ true — re-run `extract-prebuilts.sh` against that revision's dump first.
 ## Regenerating
 
 ```bash
-tools/extract-prebuilts.sh /path/to/firmware/images
+bash tools/extract-prebuilts.sh /path/to/firmware/images
 ```
 
 The script only slices bytes, so it runs on the phone itself. It also verifies
@@ -61,11 +61,11 @@ touch drivers live in the `vendor_dlkm` logical partition inside `super.img`.
 python3 tools/vendor_ramdisk.py info prebuilt/vendor_ramdisk00
 
 # try to pull the touch modules from it (usually finds none — see above)
-tools/collect-blobs.sh --modules
+bash tools/collect-blobs.sh --modules
 
 # real options for getting them:
-tools/collect-blobs.sh --from-orangefox        # the public port publishes them
-tools/collect-blobs.sh --from-dump <super-extract-dir>   # from your own ROM
+bash tools/collect-blobs.sh --from-orangefox        # the public port publishes them
+bash tools/collect-blobs.sh --from-dump <super-extract-dir>   # from your own ROM
 ```
 
 Only the modules recovery needs are ever copied here: every file in

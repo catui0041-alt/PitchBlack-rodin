@@ -65,7 +65,7 @@ device/xiaomi/rodin/
     ├── collect-blobs.sh        جمع الـ blobs + الوحدات (+ --check)
     └── make-vendor-boot.sh     تجميع + توقيع + حماية الحجم
 .github/workflows/pbrp-build.yml  البناء السحابي
-tools/setup-swap.sh               swap للـ CI
+bash tools/setup-swap.sh         swap للـ CI
 docs/                             ملاحظات rodin + البناء والفلاش
 ```
 
@@ -75,7 +75,7 @@ docs/                             ملاحظات rodin + البناء والفل
 
 ```bash
 cd device/xiaomi/rodin
-tools/extract-prebuilts.sh /storage/emulated/0/HyperOS.4.0.3.0.Rodin.CN/images
+bash tools/extract-prebuilts.sh /storage/emulated/0/HyperOS.4.0.3.0.Rodin.CN/images
 ```
 
 تنتج: `prebuilt/kernel` و`prebuilt/vendor_ramdisk00` و

@@ -8,6 +8,7 @@
 #   * the shell/python tools parse
 #   * the wildcard logic in device.mk/proprietary picks files up when present
 #   * the CI workflow is valid YAML
+#   * files that get executed carry the executable bit in the commit
 #
 # Run from anywhere:  tools/verify-tree.sh
 #
@@ -293,6 +294,77 @@ if [[ -z "${dupes}" ]]; then
     pass "no duplicated device/mount/fstype entries"
 else
     fail "duplicated entries for: ${dupes}"
+fi
+
+note "exec bits"
+# git keeps the executable bit in the index and nowhere else. This tree is
+# edited from phones: Android's /sdcard reports every file as -rw-rw---- and the
+# clone runs with core.filemode=false, so a local chmod is dropped silently and
+# nothing local ever complains. On the runner that commits as mode 100644 and is
+# fatal — step 16 executed tools/make-vendor-boot.sh directly and died with exit
+# code 126, "Permission denied", after step 15 had already spent 50 minutes
+# producing vendor_boot.img. Modes are read from the index because the index is
+# what git writes into the commit.
+index_modes="$(git -C "${REPO_DIR}" ls-files -s 2>/dev/null || true)"
+if [[ -z "${index_modes}" ]]; then
+    echo "  skip  not a git checkout, cannot read committed file modes"
+else
+    index_mode() { awk -v p="$1" '$4 == p { print $1; exit }' <<< "${index_modes}"; }
+
+    # 1. Scripts the workflow runs in command position. `bash foo.sh` and
+    #    `python3 foo.py` bring their own interpreter; a bare `foo.sh` needs the
+    #    bit. Split each line on shell separators first so `if foo.sh; then`
+    #    and `x && foo.sh` count as invocations too.
+    direct_bad=""
+    while IFS= read -r line; do
+        [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+        line="${line%%#*}"
+        while IFS= read -r seg; do
+            seg="${seg#"${seg%%[![:space:]]*}"}"
+            token="${seg%%[[:space:]]*}"
+            # Only interpreted scripts: a `for f in a.img b.dtb` list also
+            # starts a segment with a path, and binaries cannot carry a
+            # shebang to run through.
+            case "${token}" in */*.sh|*/*.py) ;; *) continue ;; esac
+            mode="$(index_mode "${token}")"
+            [[ -z "${mode}" ]] && continue
+            [[ "${mode}" == "100755" ]] || direct_bad="${direct_bad} ${token}"
+        done < <(tr ';|&(' '\n' <<< "${line}")
+    done < "${REPO_DIR}/.github/workflows/pbrp-build.yml"
+    if [[ -z "${direct_bad}" ]]; then
+        pass "every script the workflow executes directly is committed 100755"
+    else
+        fail "workflow executes non-executable file(s):${direct_bad}"
+    fi
+
+    # 2. What init execs must be executable in the ramdisk too. Every copy
+    #    destination under a bin/ directory is a program init or a service
+    #    starts with execve, which fails with EACCES on a 0644 file: a
+    #    non-executable tee-supplicant takes the TEE services, weaver and touch
+    #    down with it, and only at runtime. The reference port commits exactly
+    #    these as 100755.
+    if [[ -n "${dests:-}" && -n "${sources:-}" ]]; then
+        read -r -a src_list <<< "${sources}"
+        read -r -a dst_list <<< "${dests}"
+        bin_bad=""
+        for i in "${!dst_list[@]}"; do
+            case "${dst_list[$i]}" in
+                */bin/*) ;;
+                *) continue ;;
+            esac
+            rel="${src_list[$i]#${REPO_DIR}/}"
+            mode="$(index_mode "${rel}")"
+            [[ -z "${mode}" ]] && continue
+            [[ "${mode}" == "100755" ]] || bin_bad="${bin_bad} ${rel}"
+        done
+        if [[ -z "${bin_bad}" ]]; then
+            pass "every file installed into a bin/ directory is committed 100755"
+        else
+            fail "installed into bin/ but committed non-executable:${bin_bad}"
+        fi
+    else
+        echo "  skip  copy list unavailable, bin/ exec bits unchecked"
+    fi
 fi
 
 note "summary"
