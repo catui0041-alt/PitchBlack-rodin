@@ -43,8 +43,11 @@ PRODUCT_PACKAGES += \
     fsck.erofs \
     fsck.f2fs \
     lpdump \
-    lpunpack \
     make_f2fs
+
+# lpunpack is a host-only tool. Listing it here makes main.mk fail the build
+# with "Host modules should be in PRODUCT_HOST_PACKAGES, not PRODUCT_PACKAGES",
+# and recovery reads super through liblp, not through that binary.
 
 PRODUCT_PACKAGES_DEBUG += \
     bootctrl \

@@ -5,7 +5,27 @@ firmware dump of **the exact firmware revision installed on the device**. Do not
 reuse a dump from another revision and expect video/touch/storage to behave;
 regenerate it after every firmware update.
 
-| File | Size (CN OS3.0.303 dump) | What it is |
+## Which region are these from? (measured, not assumed)
+
+An earlier note in this tree called the dump "CN". That was wrong. Measured on
+2026-10-08 against the image actually flashed on the phone:
+
+* `sha256(vendor_boot_stock.img)` = `f3e58747...e25177`, byte-identical to
+  `images/vendor_boot.img` of the flashed fastboot package.
+* Region tokens inside that package: `WOJMIXM` in `boot.img`,
+  `vendor_boot.img` and `init_boot.img` — **global (MIXM)**, not `WOJCNXM`.
+* Platform ramdisk here is 29,231,353 bytes; the reference port carries
+  29,235,080 for its global profile and 29,188,968 for its CN profile, so this
+  is a *different revision* of the global family.
+* `prebuilt/modules/*.ko` (7 files) match the reference's `prebuilt/global/modules/`
+  byte for byte, so the touch set is the global one.
+
+Consequence: this build keeps the platform ramdisk, DTB and kernel that the
+device already boots, so flashing it changes only the recovery ramdisk. On a
+device running a *different* firmware revision (global or CN) that is no longer
+true — re-run `extract-prebuilts.sh` against that revision's dump first.
+
+| File | Size (global MIXM package dump) | What it is |
 |---|---|---|
 | `kernel` | 17,184,688 | Kernel from `boot.img` (lz4 legacy). Kept for reference and for tooling; recovery does not carry a kernel. |
 | `vendor_ramdisk00` | 29,231,353 | The stock **platform** vendor ramdisk (first-stage init + MediaTek storage/display modules). Packed back into the new vendor_boot unchanged. |

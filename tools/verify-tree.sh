@@ -201,6 +201,21 @@ if grep -qE "^[[:space:]]*PRODUCT_USE_DYNAMIC_PARTITIONS[[:space:]]*:=" "${DEVIC
 else
     fail "device.mk does not set PRODUCT_USE_DYNAMIC_PARTITIONS"
 fi
+# Host-only tools in the device package list abort the build in main.mk
+# ("Host modules should be in PRODUCT_HOST_PACKAGES"); lpunpack did exactly
+# that on the first hosted build that reached the rule parser.
+host_in_device=""
+for m in lpunpack lpmake lpdump_host; do
+    if awk '/^PRODUCT_PACKAGES[[:space:]]*\+?=/{f=1} f && /^[[:space:]]*'"${m}"'[[:space:]]*\\?[[:space:]]*$/{found=1} /^$/{f=0} END{exit !found}' \
+        "${DEVICE_DIR}/device.mk"; then
+        host_in_device="${host_in_device} ${m}"
+    fi
+done
+if [[ -z "${host_in_device}" ]]; then
+    pass "device.mk lists no host-only tools in PRODUCT_PACKAGES"
+else
+    fail "host-only tool(s) in PRODUCT_PACKAGES:${host_in_device}"
+fi
 
 note "recovery.fstab sanity"
 fstab="${DEVICE_DIR}/recovery/root/system/etc/recovery.fstab"

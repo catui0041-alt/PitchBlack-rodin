@@ -111,6 +111,27 @@ vendor_boot.img ─┬ platform ramdisk │→ البوت لودر يقلع reco
 * `vendor_boot` لا يقبل الفلاش: تأكد أن الحجم 67,108,864 بالضبط
   (`stat -c %s`).
 
+## الإقليم: ما قِسته فعلاً (2026-10-08) — تصحيح لما كُتب سابقاً
+
+كنت أكتب أن الدامب «صيني». هذا **خطأ**، والقياس يقول غير ذلك:
+
+| الدليل | القياس |
+|---|---|
+| `sha256(vendor_boot_stock.img)` | `f3e58747…e25177` = **مطابق بايت ببايت** لـ`HyperOS.4.0.3.0.Rodin.CN/images/vendor_boot.img` (الحزمة التي فُلّشت على الجهاز) |
+| علامات الإقليم داخل `boot.img` | `WOJMIXM` (عالمي) |
+| داخل `vendor_boot.img` | `WOJMIXM` ×3 و`missi/MISSI` ×25 |
+| داخل `init_boot.img` | `WOJMIXM` ×2 |
+| حجم ramdisk الـ platform عندنا | 29,231,353 — مقابل 29,235,080 (عند المنفذ المرجعي: عالمي) و29,188,968 (صيني) |
+| وحدات اللمس عندنا (7 ملفات) | مطابقة **بالبايت** لمجلد `prebuilt/global/modules/` عند المنفذ — لا لجذر CN |
+| الجهاز نفسه | `ro.boot.hwc=GL` · `vendor_dlkm`=`OS3.0.10.0.WOJMIXM` · `vendor`/`odm`=`WOJCNXM` · `system`=`WAACNXM` → مزيج: super صيني + سلسلة إقلاع عالمية |
+
+الخلاصة العملية:
+
+* على جهاز بإصدار الفلاشة نفسه: لا يتغيّر شيء سوى ramdisk الاسترجاع (النواة/DTB/ramdisk المنصة تبقى كما هي).
+* على إصدار آخر (صيني أو عالمي مختلف): ramdisk المنصة مرتبط بالإصدار → أعد `extract-prebuilts.sh` من دامب ذلك الإصدار.
+* **فك التشفير (FBE/MiTEE) لم يُثبَت**: المنفذ المرجعي يبني واجهة Weaver من المصدر (`init.recovery.keymint.rc` + `twrp.flags`)، ونحن نعتمد على blobs البائع فقط.
+* المنفذ المرجعي يفصل بناء CN عن building global ويضيف: `tools/import-global-firmware-inputs.sh`، `tools/patch-recovery-touch-modules.sh`، `tools/build-system-compatible-vendor-boot.sh`، وتعديل `recovery.fstab`/`twrp.flags` — أي أن «صورة واحدة للجميع» ليست ادّعاءه هو أيضاً.
+
 ## الإسناد
 
 بنية البناء لهذا اللوح (نمط ramdisk الـ platform + FBE + حزم اللمس) مبنية على
