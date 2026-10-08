@@ -1,0 +1,9 @@
+# Packages the recovery-only modules into the vendor_boot image.
+# Only present when prebuilt/modules contains at least one .ko file.
+
+service rodin_recovery_modules /system/bin/load-touch-modules.sh
+    class late_start
+    user root
+    group root
+    seclabel u:r:recovery:s0
+    oneshot

@@ -1,0 +1,283 @@
+name: Build PBRP for rodin
+
+# Cloud build for the PitchBlack Recovery of POCO X7 Pro / Redmi Turbo 4.
+#
+# The phone cannot build this itself: a PBRP tree peaks around 83 GiB of source
+# plus output. This workflow reclaims the runner's disk, adds swap, syncs the
+# PBRP manifest, injects the device tree and produces a signed vendor_boot.img.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pbrp_branch:
+        description: PBRP manifest branch
+        required: true
+        default: android-14.0
+        type: choice
+        options:
+          - android-14.0
+          - android-12.1
+      build_jobs:
+        description: Ninja jobs (lower if the runner swaps hard)
+        required: true
+        default: "4"
+        type: string
+      sign_image:
+        description: Sign the final image with the AOSP test key
+        required: true
+        default: true
+        type: boolean
+  push:
+    branches: [main]
+    paths-ignore:
+      - README.md
+      - docs/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pbrp-rodin-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PBRP_TOP: ${{ github.workspace }}/PBRP
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 3G
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out device tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: device-tree
+
+      - name: Free runner disk space
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Install host packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl device-tree-compiler flex \
+            g++-multilib gcc-multilib git gnupg gperf imagemagick \
+            lib32ncurses-dev lib32readline-dev lib32z1-dev libelf-dev \
+            liblz4-tool libncurses-dev libsdl1.2-dev libssl-dev libxml2 \
+            libxml2-utils lz4 openjdk-17-jdk-headless pngcrush \
+            python-is-python3 python3 ripgrep rsync schedtool squashfs-tools \
+            unzip xsltproc zip zlib1g-dev
+          sudo apt-get clean
+          java_home="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+          test -x "${java_home}/bin/java"
+          echo "JAVA_HOME=${java_home}" >> "$GITHUB_ENV"
+
+      - name: Verify the device tree carries its prebuilts
+        shell: bash
+        run: |
+          set -euo pipefail
+          tree="$GITHUB_WORKSPACE/device-tree"
+          missing=0
+          for f in \
+            device/xiaomi/rodin/prebuilt/vendor_boot_stock.img \
+            device/xiaomi/rodin/prebuilt/vendor_ramdisk00 \
+            device/xiaomi/rodin/prebuilt/dtb/mt6899-rodin.dtb
+          do
+            if [ ! -s "${tree}/${f}" ]; then
+              echo "::error::missing ${f}. Run device/xiaomi/rodin/tools/extract-prebuilts.sh against a firmware dump and commit the result."
+              missing=1
+            fi
+          done
+          [ "${missing}" -eq 0 ]
+          test "$(stat -c %s "$tree/device/xiaomi/rodin/prebuilt/vendor_boot_stock.img")" -eq 67108864
+          echo "prebuilts present"
+
+      - name: Set up build swap
+        shell: bash
+        run: |
+          set -euo pipefail
+          MIN_SWAP_GIB=12 bash "$GITHUB_WORKSPACE/device-tree/tools/setup-swap.sh"
+          free -h
+
+      - name: Check runner capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')"
+          required_kib=$((98 * 1024 * 1024))
+          if [ -z "${available_kib}" ] || [ "${available_kib}" -lt "${required_kib}" ]; then
+            echo "::error::PBRP rodin needs about 98 GiB free after the runner cleanup; found $((available_kib / 1024 / 1024)) GiB. Use a larger runner."
+            exit 1
+          fi
+          memory_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+          if [ "${memory_kib}" -lt $((14 * 1024 * 1024)) ]; then
+            echo "::error::This build needs a 16 GB-class runner; found $((memory_kib / 1024 / 1024)) GiB RAM."
+            exit 1
+          fi
+          df -h "$GITHUB_WORKSPACE"
+          free -h
+
+      - name: Install the repo tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d "$HOME/bin"
+          curl --fail --location --retry 5 --retry-all-errors \
+            https://storage.googleapis.com/git-repo-downloads/repo --output "$HOME/bin/repo"
+          chmod +x "$HOME/bin/repo"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      # No working-directory here on purpose: $PBRP_TOP does not exist yet and
+      # GitHub fails a step whose working directory is missing.
+      - name: Sync PBRP sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$PBRP_TOP"
+          cd "$PBRP_TOP"
+          git config --global http.lowSpeedLimit 1
+          git config --global http.lowSpeedTime 600
+          repo init --depth=1 -u https://github.com/PitchBlackRecoveryProject/manifest_pb -b "${{ inputs.pbrp_branch || 'android-14.0' }}"
+          ( while sleep 60; do date -u '+%Y-%m-%dT%H:%M:%SZ sync heartbeat'; df -h "$GITHUB_WORKSPACE" | tail -1; done ) &
+          heartbeat=$!
+          trap 'kill "$heartbeat" 2>/dev/null || true' EXIT
+          ok=0
+          for attempt in 1 2 3; do
+            if repo sync -c -j4 --retry-fetches=3 --no-clone-bundle --no-tags --optimized-fetch; then
+              ok=1; break
+            fi
+            echo "::warning::sync attempt ${attempt} failed, retrying"
+            sleep $((attempt * 20))
+          done
+          kill "$heartbeat" 2>/dev/null || true
+          trap - EXIT
+          [ "$ok" -eq 1 ]
+
+      - name: Install the rodin device tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete --exclude .git --exclude .github \
+            "$GITHUB_WORKSPACE/device-tree/device/" "$PBRP_TOP/device/"
+          ls -l "$PBRP_TOP/device/xiaomi/rodin" | head -20
+          df -h "$GITHUB_WORKSPACE" | tail -1
+
+      - name: Restore compiler cache
+        id: ccache_restore
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: pbrp-rodin-ccache-${{ runner.os }}-${{ inputs.pbrp_branch || 'android-14.0' }}-${{ github.sha }}
+          restore-keys: |
+            pbrp-rodin-ccache-${{ runner.os }}-${{ inputs.pbrp_branch || 'android-14.0' }}-
+
+      - name: Configure compiler cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d "$CCACHE_DIR"
+          ccache -M "$CCACHE_MAXSIZE"
+          ccache -z
+
+      - name: Build vendor_boot
+        shell: bash
+        working-directory: ${{ env.PBRP_TOP }}
+        env:
+          ALLOW_MISSING_DEPENDENCIES: "true"
+          GOMEMLIMIT: 3GiB
+          GOGC: "20"
+          _JAVA_OPTIONS: -Xmx3g
+          USE_CCACHE: "1"
+          CCACHE_EXEC: /usr/bin/ccache
+          CCACHE_COMPILERCHECK: content
+          CCACHE_COMPRESS: "true"
+        run: |
+          set -euo pipefail
+          jobs="${{ inputs.build_jobs || '4' }}"
+          export NINJA_ARGS="-j${jobs} -l${jobs}"
+          export SOONG_UI_NINJA_ARGS="$NINJA_ARGS"
+          export NINJA_HIGHMEM_NUM_JOBS=1
+          ( while sleep 60; do date -u '+%Y-%m-%dT%H:%M:%SZ build heartbeat'; df -h "$GITHUB_WORKSPACE" | tail -1; free -h | head -2; done ) &
+          heartbeat=$!
+          trap 'kill "$heartbeat" 2>/dev/null || true' EXIT
+          set +u
+          source build/envsetup.sh
+          lunch pb_rodin-eng
+          set -u
+          mka -j"${jobs}" vendorbootimage 2>&1 | tee "$GITHUB_WORKSPACE/pbrp-build.log"
+          kill "$heartbeat" 2>/dev/null || true
+          trap - EXIT
+
+      - name: Assemble and sign the flashable image
+        shell: bash
+        working-directory: ${{ env.PBRP_TOP }}
+        run: |
+          set -euo pipefail
+          flags=""
+          if [ "${{ inputs.sign_image }}" != "true" ]; then flags="--no-avb"; fi
+          device/xiaomi/rodin/tools/make-vendor-boot.sh $flags \
+            --out "$PBRP_TOP/out/target/product/rodin/vendor_boot-rodin.img" 2>&1 | tee -a "$GITHUB_WORKSPACE/pbrp-build.log"
+
+      - name: Validate the image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$PBRP_TOP/out/target/product/rodin/vendor_boot-rodin.img"
+          test -f "$image"
+          test "$(stat -c %s "$image")" -eq 67108864
+          sha256sum --check --strict "${image}.sha256"
+          python3 "$GITHUB_WORKSPACE/device-tree/device/xiaomi/rodin/tools/vendor_boot_tool.py" info "$image"
+          avbtool="$PBRP_TOP/out/host/linux-x86/bin/avbtool"
+          if [ -x "$avbtool" ] && [ "${{ inputs.sign_image }}" = "true" ]; then
+            "$avbtool" verify_image --image "$image"
+          fi
+
+      - name: Collect the artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d "$GITHUB_WORKSPACE/artifacts"
+          cp -f "$PBRP_TOP/out/target/product/rodin/vendor_boot-rodin.img" "$GITHUB_WORKSPACE/artifacts/"
+          cp -f "$PBRP_TOP/out/target/product/rodin/vendor_boot-rodin.img.sha256" "$GITHUB_WORKSPACE/artifacts/"
+          {
+            echo "PBRP build for rodin"
+            echo "- device tree commit: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+            echo "- PBRP branch: ${{ inputs.pbrp_branch || 'android-14.0' }}"
+            echo "- run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo "Flash: fastboot flash vendor_boot vendor_boot-rodin.img"
+            echo "This is an unofficial build of the PitchBlack Recovery Project."
+          } > "$GITHUB_WORKSPACE/artifacts/build-info.md"
+
+      - name: Upload the image
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbrp-rodin-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbrp-rodin-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            pbrp-build.log
+            PBRP/out/logs
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Save compiler cache
+        if: ${{ success() && steps.ccache_restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: pbrp-rodin-ccache-${{ runner.os }}-${{ inputs.pbrp_branch || 'android-14.0' }}-${{ github.sha }}

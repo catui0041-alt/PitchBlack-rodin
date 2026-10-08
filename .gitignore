@@ -1,0 +1,11 @@
+# Android/PBRP build output
+out/
+.ccache/
+*.log
+
+# Scratch space used by the tools
+/tmp-verify/
+
+# Python bytecode from tools/verify-tree.sh
+__pycache__/
+*.pyc

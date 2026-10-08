@@ -1,0 +1,12 @@
+# Recovery init additions for rodin (MediaTek MT6899).
+#
+# Keep this file minimal: every line runs before the recovery UI starts, so a
+# mistake here is a boot failure instead of a cosmetic bug. Add MTK-specific
+# sequences only after taking a log from a build that already boots.
+
+on early-init
+    mkdir /data 0771 system system
+
+on boot
+    mkdir /tmp 0777 root root
+    mkdir /cache 0771 system cache

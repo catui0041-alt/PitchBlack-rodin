@@ -1,0 +1,24 @@
+# TWRP/PBRP flag overrides for rodin.
+# Syntax: <device>  flags=<flag>[;<flag>...]
+# These entries only add UI/backup behaviour; the mount rules stay in
+# recovery.fstab. Verify this file on the first boot of a new build: a device
+# path that does not match produces a harmless "no fstab entry" log line, not
+# a boot failure, but the affected partition will be hidden from the UI.
+
+/dev/block/by-name/userdata     flags=display="Data";backup=1;wipeingui;settingsstorage;mounttodecrypt;canbewiped
+/dev/block/by-name/rescue       flags=display="Cache";backup=1;wipeingui;canbewiped
+/dev/block/by-name/metadata     flags=display="Metadata";backup=1
+/dev/block/by-name/persist      flags=display="Persist";backup=1
+/dev/block/by-name/protect1     flags=display="Protect F";backup=1
+/dev/block/by-name/protect2     flags=display="Protect S";backup=1
+
+# Images that users flash from recovery.
+/dev/block/by-name/boot         flags=display="Boot";backup=1;flashimg=1
+/dev/block/by-name/init_boot    flags=display="Init Boot";backup=1;flashimg=1
+/dev/block/by-name/vendor_boot  flags=display="Vendor Boot";backup=1;flashimg=1
+/dev/block/by-name/dtbo         flags=display="DTBO";backup=1;flashimg=1
+/dev/block/by-name/odmdtbo      flags=display="ODM DTBO";flashimg=1
+/dev/block/by-name/vbmeta       flags=display="VBMeta";flashimg=1
+/dev/block/by-name/vbmeta_system flags=display="VBMeta System";flashimg=1
+/dev/block/by-name/vbmeta_vendor flags=display="VBMeta Vendor";flashimg=1
+/dev/block/by-name/logo         flags=display="Logo";flashimg=1
