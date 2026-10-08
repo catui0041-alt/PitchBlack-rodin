@@ -296,6 +296,88 @@ else
     fail "duplicated entries for: ${dupes}"
 fi
 
+note "platform ramdisk prune"
+# make-vendor-boot.sh drops the stock-recovery userspace out of the platform
+# ramdisk before repacking it. Without those ~5.5 MiB the recovery fragment does
+# not fit in the 64 MiB vendor_boot partition at all — the packer refused a
+# 41.0 MiB fragment with 35.6 MiB of room — and the boot-time files the prune
+# must keep cannot be discovered by reading the list, only by checking it
+# against the archive it will run on. Same for the MediaTek BootControl
+# manifest: deleting it instead of moving it out of /system leaves Keystore2
+# unable to start, so decryption silently stops working.
+boot_script="${DEVICE_DIR}/tools/make-vendor-boot.sh"
+platform_ramdisk="${DEVICE_DIR}/prebuilt/vendor_ramdisk00"
+if [[ ! -s "${platform_ramdisk}" ]]; then
+    echo "  skip  prebuilt/vendor_ramdisk00 is missing, cannot check the prune"
+elif ! command -v python3 >/dev/null 2>&1; then
+    echo "  skip  python3 is missing, cannot list the platform ramdisk"
+else
+    members_file="${HARNESS}/platform-members.txt"
+    if ! python3 "${DEVICE_DIR}/tools/vendor_ramdisk.py" list "${platform_ramdisk}" > "${members_file}" 2>/dev/null; then
+        fail "vendor_ramdisk.py cannot list ${platform_ramdisk}"
+    else
+        members="$(awk '{print $3}' "${members_file}")"
+        prune_paths="$(sed -n '/^PLATFORM_PRUNE_PATHS="/,/^"$/p' "${boot_script}" | sed '1d;$d')"
+        essentials="$(sed -n '/^PLATFORM_ESSENTIALS="/,/^"$/p' "${boot_script}" | sed '1d;$d')"
+        expected_modules="$(sed -n 's/^EXPECTED_PLATFORM_MODULES=//p' "${boot_script}")"
+
+        if [[ -z "${prune_paths}" || -z "${essentials}" || -z "${expected_modules}" ]]; then
+            fail "cannot read the prune list out of make-vendor-boot.sh"
+        else
+            absent=""
+            for p in ${prune_paths}; do
+                grep -qE "^${p}(/|$)" <<< "${members}" || absent="${absent} ${p}"
+            done
+            if [[ -z "${absent}" ]]; then
+                pass "each of the $(wc -w <<< "${prune_paths}") pruned paths exists in the stock platform ramdisk"
+            else
+                fail "the prune names paths the stock platform ramdisk does not have:${absent}"
+            fi
+
+            # Missing from the archive, or covered by the prune list itself —
+            # the second is how a kept file gets deleted anyway.
+            lost=""
+            for f in ${essentials}; do
+                grep -qxF "${f}" <<< "${members}" || lost="${lost} ${f}(absent)"
+                for p in ${prune_paths}; do
+                    if [[ "${f}" == "${p}" || "${f}" == "${p}/"* ]]; then
+                        lost="${lost} ${f}(pruned by ${p})"
+                    fi
+                done
+            done
+            if [[ -z "${lost}" ]]; then
+                pass "every file the prune must keep survives it"
+            else
+                fail "the prune would leave boot without:${lost}"
+            fi
+
+            modules="$(grep -cE '^lib/modules/[^/]+[.]ko$' <<< "${members}")"
+            if [[ "${modules}" == "${expected_modules}" ]]; then
+                pass "the platform ramdisk holds the ${expected_modules} kernel modules the prune asserts"
+            else
+                fail "the prune asserts ${expected_modules} platform modules but the ramdisk holds ${modules}"
+            fi
+
+            # The boot-time trap: a device manifest below /system keeps
+            # hwservicemanager from starting Keystore2. It has to be moved, not
+            # deleted, and the move has to be asserted after the prune.
+            if grep -q 'vendor/etc/vintf/manifest' "${boot_script}" &&
+               grep -qF 'type="device"' "${boot_script}" &&
+               grep -qxF 'system/etc/vintf/manifest/android.hardware.boot-service.mtk.xml' <<< "${members}"; then
+                pass "the prune relocates the device VINTF manifest out of /system"
+            else
+                fail "the prune does not relocate the device VINTF manifest out of /system"
+            fi
+
+            if grep -q -- '--platform "${PRUNED_PLATFORM}"' "${boot_script}"; then
+                pass "the image is assembled from the pruned platform fragment"
+            else
+                fail "make-vendor-boot.sh packs the stock platform fragment again"
+            fi
+        fi
+    fi
+fi
+
 note "exec bits"
 # git keeps the executable bit in the index and nowhere else. This tree is
 # edited from phones: Android's /sdcard reports every file as -rw-rw---- and the

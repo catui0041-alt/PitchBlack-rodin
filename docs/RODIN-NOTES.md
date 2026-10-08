@@ -62,17 +62,45 @@
 
 ### ميزانية قسم vendor_boot
 
+قبل التقليم (ما قِسته في البناء الفاشل 2026-10-08):
+
 ```
 64.0 MiB  حجم القسم
--27.9 MiB ramdisk الـ platform
+-27.9 MiB ramdisk الـ platform (الستوك كما هو)
 - 0.42 MiB الـ DTB (بحاويته)
 - 0.001 MiB الجدول + vbmeta
-= 35.7 MiB  أقصى حجم لـ ramdisk الاسترجاع المبني
+= 35.6 MiB  أقصى حجم لـ ramdisk الاسترجاع المبني
 ```
 
-الأصلي كان 13.5 ميجا فقط، وأي PBRP كامل يقارب الحد. لهذا السبب:
-`make-vendor-boot.sh` يقيس الحجم ويفشل مبكراً برسالة تشرح الحلول، و
-`collect-blobs.sh` يستخرج فقط الوحدات المطلوبة لا 244 وحدة (30 ميجا).
+والسطر الذي أفشل خطوة 16 بعد بناء ناجح 52 دقيقة:
+`the recovery ramdisk is 41.0 MiB but only 35.6 MiB fit in vendor_boot`.
+
+**التقليم هو الحل، وليس تصغير PBRP:** ramdisk الـ platform الستوك 72,030,720
+بايت غير مضغوطة (749 مدخلاً) منها **13,639,266 بايت** مستخدمة الاسترجاع
+الستوك المدمج — `system/bin/recovery` و`adbd` و`fastbootd` و
+`update_engine_sideload` و`toybox` و`toolbox` و`sh` و`logd` و
+`servicemanager` و`res/` و`librecovery_ui.so` — وهي كلها يُستبدل بها
+ramdisk الاسترجاع الذي نبنيه. حذفها يوفّر ~5.5 ميجا في الصورة، فيصير السقف
+**~41.2 ميجا** بدلاً من 35.6، والأصلي المسترجاع الستوك 13.5 ميجا فقط.
+
+`make-vendor-boot.sh` بعد التقليم يتحقق قبل التغليف من:
+
+* وجود كل ملف يحتاجه first-stage init (`system/bin/init` و`linker64`
+  و`libc.so` و`libmtk_bsg.so` وخدمة BootControl و`first_stage_ramdisk/fstab.mt6899`
+  و`lib/modules/modules.load`) — وإلا يفشل البناء بدلاً من الجهاز.
+* بقاء 244 وحدة نواة كما هي.
+* عدم بقاء أي قطعة VINTF `type="device"` تحت `/system`: القطعة هناك تُقرأ
+  كـ framework fragment فيتوقف hwservicemanager عن تشغيل Keystore2 — وهذا
+  سبب مستقل عن الحجم، ولذلك يُنقل بيان MediaTek BootControl إلى
+  `vendor/etc/vintf/manifest/` ولا يُحذف.
+
+ولذلك أيضاً يستخدم السكربت قطعة الاسترجاع التي بنىها البناء نفسه
+(`obj/PACKAGING/vendor_ramdisk_fragments_intermediates/recovery.cpio.lz4`)
+حين تكون أصغر من إعادة تغليفنا.
+
+`tools/verify-tree.sh` يفحص قائمة التقليم مقابل الأرشيف الحقيقي (كل مسار
+موجود، الأساسي ينجو، عدد الوحدات صحيح) لأن خطأً حرفياً في هذه القائمة لا
+يظهر إلا على الجهاز.
 
 ## آلية التسليم
 
