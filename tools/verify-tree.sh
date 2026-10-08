@@ -171,6 +171,15 @@ else
     echo "  skip  no interpreter with PyYAML found (pip install pyyaml to enable this check)"
 fi
 
+note "workflow build requirements"
+# PBRP's vendor/pb/build/tools/roomservice.py reads this file while the build
+# is parsed, so a blanket `rm -rf .repo` kills the build after the sync.
+if grep -qE 'rm -rf "\$\{?PBRP_TOP\}?/\.repo"' "${workflow}"; then
+    fail "workflow deletes all of .repo; roomservice.py needs .repo/manifests/default.xml"
+else
+    pass "workflow keeps .repo/manifests while dropping the object stores"
+fi
+
 note "board config scope"
 # AOSP marks these as readonly once board scope begins, so assigning one in
 # BoardConfig.mk aborts the build with "cannot assign to readonly variable".

@@ -182,12 +182,22 @@ jobs:
           trap - EXIT
           [ "$ok" -eq 1 ]
 
-      - name: Drop repo metadata and verify there is room to build
+      - name: Drop repo object stores and verify there is room to build
         shell: bash
         run: |
           set -euo pipefail
           du -sh "$PBRP_TOP/.repo" 2>/dev/null || true
-          rm -rf "$PBRP_TOP/.repo"
+          # Only the git object stores are worth removing. PBRP's own
+          # vendor/pb/build/tools/roomservice.py opens
+          # .repo/manifests/default.xml while the build is parsed, so deleting
+          # all of .repo fails the build with FileNotFoundError.
+          rm -rf "$PBRP_TOP/.repo/projects" "$PBRP_TOP/.repo/project-objects" \
+            "$PBRP_TOP/.repo/objects" 2>/dev/null || true
+          if [ ! -f "$PBRP_TOP/.repo/manifests/default.xml" ]; then
+            echo "::error::.repo/manifests/default.xml is missing; PBRP's roomservice.py needs it."
+            exit 1
+          fi
+          du -sh "$PBRP_TOP/.repo" 2>/dev/null || true
           du -sh "$PBRP_TOP" 2>/dev/null || true
           available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')"
           available_gib=$((available_kib / 1024 / 1024))
