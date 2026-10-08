@@ -103,12 +103,17 @@ else
     fi
 
     # The blob/module rules are wildcard-guarded: create a dummy of each and
-    # confirm it shows up, then remove it.
+    # confirm it shows up, then remove it. Anything real at those paths is
+    # backed up first — once the blob set is populated these are real files and
+    # a test must never clobber them.
     dummy_blob="${DEVICE_DIR}/proprietary/vendor/bin/tee-supplicant"
-    mkdir -p "$(dirname "${dummy_blob}")"
-    : > "${dummy_blob}"
     dummy_module="${DEVICE_DIR}/prebuilt/modules/verify-dummy.ko"
-    mkdir -p "$(dirname "${dummy_module}")"
+    blob_backup=""
+    module_backup=""
+    if [[ -e "${dummy_blob}" ]]; then blob_backup="${HARNESS}/blob.bak"; cp -p "${dummy_blob}" "${blob_backup}"; fi
+    if [[ -e "${dummy_module}" ]]; then module_backup="${HARNESS}/module.bak"; cp -p "${dummy_module}" "${module_backup}"; fi
+    mkdir -p "$(dirname "${dummy_blob}")" "$(dirname "${dummy_module}")"
+    : > "${dummy_blob}"
     : > "${dummy_module}"
     with_dummies="$(make -s -f "${HARNESS}/harness.mk" all 2>/dev/null)"
     if grep -q "tee-supplicant" <<< "${with_dummies}"; then
@@ -127,6 +132,8 @@ else
         fail "module loader script is not packaged when modules exist"
     fi
     rm -f "${dummy_blob}" "${dummy_module}"
+    if [[ -n "${blob_backup}" ]]; then cp -p "${blob_backup}" "${dummy_blob}"; fi
+    if [[ -n "${module_backup}" ]]; then cp -p "${module_backup}" "${dummy_module}"; fi
     without_dummies="$(make -s -f "${HARNESS}/harness.mk" all 2>/dev/null)"
     if [[ "${without_dummies}" == "${sources}" ]]; then
         pass "removing the dummies restores the original copy list"

@@ -9,3 +9,6 @@ out/
 # Python bytecode from tools/verify-tree.sh
 __pycache__/
 *.pyc
+
+# blob collection cache (git clone of the reference port)
+.collect-cache/

@@ -219,8 +219,11 @@ jobs:
         working-directory: ${{ env.PBRP_TOP }}
         run: |
           set -euo pipefail
+          # Sign by default: a push-triggered run has no inputs at all, and an
+          # unsigned image is the wrong default for a device that still has
+          # AVB enabled. Only an explicit "false" skips the signature.
           flags=""
-          if [ "${{ inputs.sign_image }}" != "true" ]; then flags="--no-avb"; fi
+          if [ "${{ inputs.sign_image }}" = "false" ]; then flags="--no-avb"; fi
           device/xiaomi/rodin/tools/make-vendor-boot.sh $flags \
             --out "$PBRP_TOP/out/target/product/rodin/vendor_boot-rodin.img" 2>&1 | tee -a "$GITHUB_WORKSPACE/pbrp-build.log"
 
@@ -234,7 +237,7 @@ jobs:
           sha256sum --check --strict "${image}.sha256"
           python3 "$GITHUB_WORKSPACE/device-tree/device/xiaomi/rodin/tools/vendor_boot_tool.py" info "$image"
           avbtool="$PBRP_TOP/out/host/linux-x86/bin/avbtool"
-          if [ -x "$avbtool" ] && [ "${{ inputs.sign_image }}" = "true" ]; then
+          if [ -x "$avbtool" ] && [ "${{ inputs.sign_image }}" != "false" ]; then
             "$avbtool" verify_image --image "$image"
           fi
 
