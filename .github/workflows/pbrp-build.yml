@@ -43,7 +43,7 @@ concurrency:
 env:
   PBRP_TOP: ${{ github.workspace }}/PBRP
   CCACHE_DIR: ${{ github.workspace }}/.ccache
-  CCACHE_MAXSIZE: 3G
+  CCACHE_MAXSIZE: 512M
 
 jobs:
   build:
@@ -58,6 +58,23 @@ jobs:
 
       - name: Free runner disk space
         uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Reclaim the payloads slimhub leaves behind
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The ubuntu-24.04 image still carries ~10 GiB of toolchains this build
+          # never touches (measured: 49 GiB free without this step, which is not
+          # enough for a PBRP tree plus its output). JAVA_HOME is resolved later,
+          # after apt installs openjdk-17.
+          sudo rm -rf \
+            /usr/local/lib/android /opt/hostedtoolcache /usr/share/dotnet \
+            /usr/local/.ghcup /opt/ghc /usr/share/swift /usr/local/share/boost \
+            /usr/lib/jvm /opt/az /usr/local/share/powershell /usr/share/miniconda \
+            /opt/google /usr/share/sbt /usr/share/kotlinc /usr/lib/google-cloud-sdk \
+            /usr/local/lib/node_modules /usr/local/share/chromium \
+            /opt/microsoft /usr/local/share/vcpkg 2>/dev/null || true
+          df -h "$GITHUB_WORKSPACE" | tail -1
 
       - name: Install host packages
         shell: bash
@@ -101,7 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MIN_SWAP_GIB=12 bash "$GITHUB_WORKSPACE/device-tree/tools/setup-swap.sh"
+          MIN_SWAP_GIB=8 bash "$GITHUB_WORKSPACE/device-tree/tools/setup-swap.sh"
           free -h
 
       - name: Check runner capacity
@@ -109,10 +126,17 @@ jobs:
         run: |
           set -euo pipefail
           available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')"
-          required_kib=$((98 * 1024 * 1024))
+          # A trimmed android-14.0 tree plus its output needs roughly 55 GiB.
+          # The standard runner has less than that, so warn when the margin is
+          # thin and let the post-sync check below be the real gate.
+          required_kib=$((38 * 1024 * 1024))
+          warn_kib=$((70 * 1024 * 1024))
           if [ -z "${available_kib}" ] || [ "${available_kib}" -lt "${required_kib}" ]; then
-            echo "::error::PBRP rodin needs about 98 GiB free after the runner cleanup; found $((available_kib / 1024 / 1024)) GiB. Use a larger runner."
+            echo "::error::PBRP rodin needs at least 38 GiB free after the runner cleanup; found $((available_kib / 1024 / 1024)) GiB. Use a larger runner."
             exit 1
+          fi
+          if [ "${available_kib}" -lt "${warn_kib}" ]; then
+            echo "::warning::$((available_kib / 1024 / 1024)) GiB free, under the 70 GiB this board usually needs; the post-sync check decides."
           fi
           memory_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
           if [ "${memory_kib}" -lt $((14 * 1024 * 1024)) ]; then
@@ -157,6 +181,23 @@ jobs:
           kill "$heartbeat" 2>/dev/null || true
           trap - EXIT
           [ "$ok" -eq 1 ]
+
+      - name: Drop repo metadata and verify there is room to build
+        shell: bash
+        run: |
+          set -euo pipefail
+          du -sh "$PBRP_TOP/.repo" 2>/dev/null || true
+          rm -rf "$PBRP_TOP/.repo"
+          du -sh "$PBRP_TOP" 2>/dev/null || true
+          available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')"
+          available_gib=$((available_kib / 1024 / 1024))
+          echo "free after checkout: ${available_gib} GiB"
+          # out/ for a recovery-only build lands around 15-20 GiB. Stop here
+          # instead of three hours into a build that cannot finish.
+          if [ "${available_gib}" -lt 22 ]; then
+            echo "::error::only ${available_gib} GiB free after the source checkout, and out/ alone needs about 22 GiB. Use a GitHub-hosted larger runner or build locally."
+            exit 1
+          fi
 
       - name: Install the rodin device tree
         shell: bash
