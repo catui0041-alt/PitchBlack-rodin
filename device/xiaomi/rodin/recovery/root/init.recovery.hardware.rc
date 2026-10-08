@@ -1,0 +1,4 @@
+# Deliberately empty, exactly like the stock recovery ramdisk for this board
+# (the file is 0 bytes inside the stock vendor_boot). It exists because init
+# imports it; add hardware-specific services here only when a log proves they
+# are needed.

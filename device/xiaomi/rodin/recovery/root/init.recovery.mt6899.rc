@@ -1,8 +1,13 @@
 # Recovery init additions for rodin (MediaTek MT6899).
 #
-# Keep this file minimal: every line runs before the recovery UI starts, so a
-# mistake here is a boot failure instead of a cosmetic bug. Add MTK-specific
-# sequences only after taking a log from a build that already boots.
+# The USB properties below are the ones the stock recovery ramdisk sets, read
+# from this device's own vendor_boot: without them adb/fastbootd do not come up
+# in recovery. Everything else stays minimal on purpose, because a mistake here
+# is a boot failure rather than a cosmetic bug.
+
+on init
+    setprop sys.usb.configfs 1
+    setprop sys.usb.controller "11201000.usb0"
 
 on early-init
     mkdir /data 0771 system system

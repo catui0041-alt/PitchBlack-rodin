@@ -12,23 +12,24 @@ Both are vendor binaries that are not built from the recovery sources.
 
 ## How to fill this directory
 
-**Option A — from your own firmware dump (recommended):**
+The file list lives in `vendor-blobs.mk` and the helper reads it from there, so
+the two never drift apart.
 
 ```bash
-# On a PC with a full ROM dump where odm/, vendor/ and the vendor ramdisk are
-# already extracted:
-tools/collect-blobs.sh /path/to/firmware_dump
-```
+# what is present / missing right now
+tools/collect-blobs.sh --check
 
-**Option B — reuse the community OrangeFox port for this board:**
+# Option A — from your own firmware dump (recommended)
+tools/collect-blobs.sh --from-dump /path/to/extracted/rom
 
-```bash
+# Option B — reuse the community OrangeFox port for this board
 tools/collect-blobs.sh --from-orangefox
 ```
 
-That clones the public port, copies its `proprietary/` tree and its prebuilt
-kernel/modules over, and prints what it did. Attribution and licensing notes are
-in `docs/RODIN-NOTES.md`; keep the credit if you publish your tree.
+Option B clones the public port, copies its `proprietary/` tree (plus its
+recovery modules when it has them) and prints what it did. Attribution and
+licensing notes are in `docs/RODIN-NOTES.md`; keep the credit if you publish
+your tree.
 
 ## Notes
 

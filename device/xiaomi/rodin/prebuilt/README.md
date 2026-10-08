@@ -32,12 +32,25 @@ python3 tools/vendor_boot_tool.py info prebuilt/vendor_boot_stock.img
 
 ## Adding recovery-only modules (touch, haptics)
 
+Measured on this device: the stock vendor_boot contains **no recovery modules at
+all** — the 244 modules in the platform ramdisk are the platform's own, and the
+touch drivers live in the `vendor_dlkm` logical partition inside `super.img`.
+
 ```bash
-lz4 -d prebuilt/vendor_ramdisk00 vendor_ramdisk00.cpio
-# extract, then copy the modules you need into prebuilt/modules/
-mkdir -p prebuilt/modules
-cp focaltech_touch_rodin.ko goodix_core_rodin.ko xiaomi_touch_rodin.ko scp.ko prebuilt/modules/
+# what is in the platform ramdisk (pure python, works on the phone)
+python3 tools/vendor_ramdisk.py info prebuilt/vendor_ramdisk00
+
+# try to pull the touch modules from it (usually finds none — see above)
+tools/collect-blobs.sh --modules
+
+# real options for getting them:
+tools/collect-blobs.sh --from-orangefox        # the public port publishes them
+tools/collect-blobs.sh --from-dump <super-extract-dir>   # from your own ROM
 ```
+
+Only the modules recovery needs are ever copied here: every file in
+`prebuilt/modules/` is packed into vendor_boot, whose budget for the whole
+recovery ramdisk is under 36 MiB.
 
 `device.mk` packages anything matching `prebuilt/modules/*.ko` plus the loader
 script, and adds an init service that loads them. Module load order is in

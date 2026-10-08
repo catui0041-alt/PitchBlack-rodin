@@ -60,3 +60,48 @@ mi_ext         /mnt/vendor/mi_ext ext4  ro wait,slotselect,avb=vbmeta,logical,fi
 /dev/block/by-name/misc            /misc            emmc  defaults  defaults
 /dev/block/by-name/seccfg          /seccfg          emmc  defaults  defaults
 /dev/block/by-name/expdb           /expdb           emmc  defaults  defaults
+
+# Firmware, TEE and bootloader partitions. Transcribed from the stock recovery
+# fstab that ships inside this device's vendor_boot, so PBRP can back up and
+# reflash them instead of hiding them.
+/dev/block/by-name/md_sec          /mnt/vendor/md_sec  ext4  noatime,nosuid,nodev,noauto_da_alloc,commit=1,nodelalloc  wait,check,formattable
+/dev/block/by-name/frp             /persistent         emmc  defaults  defaults
+/dev/block/by-name/nvram           /nvram              emmc  defaults  defaults
+/dev/block/by-name/proinfo         /proinfo            emmc  defaults  defaults
+/dev/block/by-name/lk1             /lk1                emmc  defaults  defaults
+/dev/block/by-name/bootloader2     /bootloader2        emmc  defaults  defaults
+/dev/block/by-name/para            /para               emmc  defaults  defaults
+/dev/block/by-name/tee1            /tee1               emmc  defaults  defaults
+/dev/block/by-name/tee2            /tee2               emmc  defaults  defaults
+/dev/block/by-name/scp1            /scp1               emmc  defaults  defaults
+/dev/block/by-name/scp2            /scp2               emmc  defaults  defaults
+/dev/block/by-name/sspm1           /sspm1              emmc  defaults  defaults
+/dev/block/by-name/sspm2           /sspm2              emmc  defaults  defaults
+/dev/block/by-name/dpm1            /dpm1               emmc  defaults  defaults
+/dev/block/by-name/dpm2            /dpm2               emmc  defaults  defaults
+/dev/block/by-name/mcupm1          /mcupm1             emmc  defaults  defaults
+/dev/block/by-name/mcupm2          /mcupm2             emmc  defaults  defaults
+/dev/block/by-name/modem           /modem              emmc  defaults  defaults
+/dev/block/by-name/md1dsp          /md1dsp             emmc  defaults  defaults
+/dev/block/by-name/md1arm7         /md1arm7            emmc  defaults  defaults
+/dev/block/by-name/md3img          /md3img             emmc  defaults  defaults
+/dev/block/by-name/gz1             /gz1                emmc  defaults  defaults
+/dev/block/by-name/gz2             /gz2                emmc  defaults  defaults
+/dev/block/by-name/ccu             /ccu                emmc  defaults  defaults
+/dev/block/by-name/vcp             /vcp                emmc  defaults  defaults
+/dev/block/by-name/gpueb           /gpueb              emmc  defaults  defaults
+/dev/block/by-name/mcf_ota         /mcf_ota            emmc  defaults  defaults
+/dev/block/by-name/mvpu_algo1      /mvpu_algo1         emmc  defaults  defaults
+/dev/block/by-name/mvpu_algo2      /mvpu_algo2         emmc  defaults  defaults
+/dev/block/by-name/apusys1         /apusys1            emmc  defaults  defaults
+/dev/block/by-name/apusys2         /apusys2            emmc  defaults  defaults
+/dev/block/by-name/spmfw           /spmfw              emmc  defaults  defaults
+/dev/block/by-name/audio_dsp       /audio_dsp          emmc  defaults  defaults
+/dev/block/by-name/pi_img          /pi_img             emmc  defaults  defaults
+/dev/block/by-name/boot_para       /boot_para          emmc  defaults  defaults
+/dev/block/by-name/connsys_wifi    /connsys_wifi       emmc  defaults  defaults
+/dev/block/by-name/connsys_bt      /connsys_bt         emmc  defaults  defaults
+/dev/block/by-name/otp             /otp                emmc  defaults  defaults
+
+# The stock first-stage table uses the same content but the name fstab.emmc;
+# both names are shipped so init finds one whichever ro.hardware resolves to.

@@ -40,6 +40,40 @@
    أحجام الـ ramdisks يُبطِل هذا التوقيع، ولذلك يُعيد `make-vendor-boot.sh`
    التوقيع بـ avbtool بمفتاح AOSP التجريبي.
 
+## استرجاع المصنع كمرجع (مقروء من جهازك)
+
+بعد فكّ الـ platform ramdisk و ramdisk الـ recovery بـ `tools/vendor_ramdisk.py`
+(14,145,147 بايت) تبين التالي، وكلّه مُطبَّق في شجرتنا:
+
+* `init.recovery.mt6899.rc` الأصلي (356 بايت) يضبط:
+  `sys.usb.configfs 1` و`sys.usb.controller "11201000.usb0"` — بدونها لا يعمل
+  adb/fastbootd في الاسترجاع. نسخنا القيم حرفياً.
+* `init.recovery.hardware.rc` **فارغ (0 بايت)** — موجود فقط ليرضى init.
+* جدول first-stage اسمه `first_stage_ramdisk/fstab.emmc`، ونحن نبني
+  `fstab.mt6899` أيضاً (الملف نفسه باسمين) تحوطاً لاختلاف `ro.hardware`.
+* `system/etc/recovery.fstab` الأصلي فيه **91 نقطة تحميل**؛ كان عندي 31.
+  أضفت 37 قسم فروموير (modem, tee1/2, scp, sspm, dpm, mcupm, gz, ccu, vcp,
+  gpueb, md1*, nvram, proinfo, lk1, bootloader2, para, otp, connsys...).
+  الـ 22 سطر المتبقية هي `overlay` لمسارات product/system — لا يحتاجها
+  الاسترجاع، والمنفذ المرجعي يحذفها أيضاً فتركتها خارجاً.
+* **لا وحدات نواة في vendor_boot إطلاقاً** (0 ملف `.ko` في ramdisk الـ recovery،
+  والـ 244 الموجودة في ramdisk الـ platform هي وحدات المنصة). وحدات اللمس
+  الحقيقية تسكن في قسم `vendor_dlkm` المنطقي داخل `super.img`.
+
+### ميزانية قسم vendor_boot
+
+```
+64.0 MiB  حجم القسم
+-27.9 MiB ramdisk الـ platform
+- 0.42 MiB الـ DTB (بحاويته)
+- 0.001 MiB الجدول + vbmeta
+= 35.7 MiB  أقصى حجم لـ ramdisk الاسترجاع المبني
+```
+
+الأصلي كان 13.5 ميجا فقط، وأي PBRP كامل يقارب الحد. لهذا السبب:
+`make-vendor-boot.sh` يقيس الحجم ويفشل مبكراً برسالة تشرح الحلول، و
+`collect-blobs.sh` يستخرج فقط الوحدات المطلوبة لا 244 وحدة (30 ميجا).
+
 ## آلية التسليم
 
 ```

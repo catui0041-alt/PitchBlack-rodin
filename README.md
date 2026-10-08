@@ -39,6 +39,14 @@ rodin ليس جهاز recovery تقليدي:
 النتيجة: **`vendor_boot.img` بحجم 67,108,864 بايت بالضبط** تُفلَش على قسم
 `vendor_boot`، ثم تقلع إلى الاسترجاع.
 
+### ميزانية الحجم (قيد حقيقي)
+
+قسم `vendor_boot` عندك 64 ميجا، ومنها 27.9 ميجا لـ ramdisk الـ platform +
+0.42 ميجا للـ DTB + ~1 كيلو للجدول وvbmeta. أي أن **الاسترجاع المبني يجب أن
+يبقى تحت 35.7 ميجا** (الأصلي كان 13.5 ميجا فقط!). `make-vendor-boot.sh` يقيس
+هذا ويفشل برسالة واضحة مع حلول قبل أن يرفض المجمّع الصورة. لهذا السبب لا ننسخ
+وحدات النواة كلها (244 وحدة = 30 ميجا).
+
 ## المحتويات
 
 ```
@@ -52,8 +60,10 @@ device/xiaomi/rodin/
 ├── proprietary/                تُملأ بالـ blobs (vendor-blobs.mk + README)
 └── tools/
     ├── extract-prebuilts.sh    يستخرج الـ prebuilts من دامب الفلاشة (مُجرَّب)
-    ├── vendor_boot_tool.py     parse/rebuild لـ vendor_boot v4 (مُجرَّب)
-    └── make-vendor-boot.sh     تجميع + توقيع الصورة النهائية
+    ├── vendor_boot_tool.py     parse/rebuild/استخراج ramdisks (مُجرَّب round-trip)
+    ├── vendor_ramdisk.py       فكّ lz4 + قراءة cpio ببايثون خالص (بدون tools)
+    ├── collect-blobs.sh        جمع الـ blobs + الوحدات (+ --check)
+    └── make-vendor-boot.sh     تجميع + توقيع + حماية الحجم
 .github/workflows/pbrp-build.yml  البناء السحابي
 tools/setup-swap.sh               swap للـ CI
 docs/                             ملاحظات rodin + البناء والفلاش

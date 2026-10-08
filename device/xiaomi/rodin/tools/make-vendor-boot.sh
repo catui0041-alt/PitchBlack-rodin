@@ -62,7 +62,34 @@ echo "== packing ${RECOVERY_ROOT}"
 # lz4 legacy format, exactly what the stock vendor_boot and AOSP's ramdisk
 # compression use.
 "${MKBOOTFS}" "${RECOVERY_ROOT}" | lz4 -l -12 --favor-decSpeed > "${RAMDISK}"
-printf '   recovery ramdisk: %s bytes\n' "$(stat -c %s "${RAMDISK}")"
+RAMDISK_SIZE="$(stat -c %s "${RAMDISK}")"
+printf '   recovery ramdisk: %s bytes\n' "${RAMDISK_SIZE}"
+
+# ------------------------------------------------------- size budget guard
+# vendor_boot already carries the stock platform ramdisk (about 29 MiB) and the
+# wrapped DTB, so only ~36 MiB are left for this recovery ramdisk. Failing here
+# with the reason beats watching the packer refuse the image later.
+PLATFORM_SIZE="$(stat -c %s "${PLATFORM_RAMDISK}")"
+DTB_SIZE="$(stat -c %s "${DTB}")"
+RESERVE=$((64 * 1024))   # ramdisk table + vbmeta + alignment slack
+BUDGET=$((PARTITION_SIZE - PLATFORM_SIZE - DTB_SIZE - 64 - RESERVE))
+printf '   budget for the recovery ramdisk: %s bytes (%.1f MiB)\n' \
+    "${BUDGET}" "$(awk -v b="${BUDGET}" 'BEGIN {print b / 1048576}')"
+if (( RAMDISK_SIZE > BUDGET )); then
+    cat >&2 <<EOF
+error: the recovery ramdisk is $(awk -v s="${RAMDISK_SIZE}" 'BEGIN {printf "%.1f", s/1048576}') MiB but only $(awk -v b="${BUDGET}" 'BEGIN {printf "%.1f", b/1048576}') MiB fit in vendor_boot.
+
+Shrink the ramdisk (these all worked for other ports of this board):
+  * strip debug data:  TW_EXCLUDE_* / remove .gnu_debugdata from binaries in the ramdisk
+  * drop unused languages and fonts from twres/ (keep one font)
+  * build without lpdump: lpdump/lpdumpd pull in protobuf and snapshot libs
+  * UPX the largest tools (or use whatever the PBRP branch offers)
+EOF
+    exit 1
+fi
+if (( BUDGET - RAMDISK_SIZE < 3 * 1024 * 1024 )); then
+    echo "   warning: only $(awk -v b="$((BUDGET - RAMDISK_SIZE))" 'BEGIN {printf "%.1f", b/1048576}') MiB of headroom left for future changes"
+fi
 
 # ------------------------------------------------------------- repack
 echo "== assembling vendor_boot"

@@ -186,6 +186,13 @@ def main():
     info = sub.add_parser("info", help="print the layout of an image")
     info.add_argument("image")
 
+    dump = sub.add_parser("extract-ramdisk",
+                          help="write one vendor ramdisk out of the image")
+    dump.add_argument("image")
+    dump.add_argument("--type", type=int, default=2,
+                      help="ramdisk type to extract (1=platform, 2=recovery, 3=dlkm)")
+    dump.add_argument("--out", required=True)
+
     rebuild = sub.add_parser("rebuild", help="write a new image")
     rebuild.add_argument("image")
     rebuild.add_argument("output")
@@ -205,6 +212,16 @@ def main():
 
     if args.command == "info":
         return 0
+
+    if args.command == "extract-ramdisk":
+        for entry in image.ramdisks:
+            if entry["type"] == args.type:
+                with open(args.out, "wb") as fh:
+                    fh.write(entry["data"])
+                print("wrote %s (%d bytes, type %d)"
+                      % (args.out, len(entry["data"]), args.type))
+                return 0
+        sys.exit("error: no ramdisk of type %d in %s" % (args.type, args.image))
 
     ramdisks = [dict(r) for r in image.ramdisks]
     if args.platform:

@@ -66,10 +66,20 @@ PRODUCT_COPY_FILES += \
 
 # first_stage_ramdisk fstab (used while the vendor ramdisk mounts partitions
 # before the recovery UI starts).
+#
+# The stock recovery ramdisk calls this file fstab.emmc, while ro.hardware on
+# this board resolves to mt6899. Both names are shipped from the single source
+# file so first-stage init finds the table either way; verified against the
+# stock vendor_boot on the device.
 ifneq ($(wildcard $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899),)
 PRODUCT_COPY_FILES += \
-    $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899:recovery/root/first_stage_ramdisk/fstab.mt6899
+    $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899:recovery/root/first_stage_ramdisk/fstab.mt6899 \
+    $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899:recovery/root/first_stage_ramdisk/fstab.emmc
 endif
+
+# Empty on the stock ramdisk (0 bytes) but init expects the file to exist.
+PRODUCT_COPY_FILES += \
+    $(DEVICE_PATH)/recovery/root/init.recovery.hardware.rc:recovery/root/init.recovery.hardware.rc
 
 # ----------------------------------------------------- kernel modules (touch)
 # Drop the recovery-only modules you extract from the ROM into
