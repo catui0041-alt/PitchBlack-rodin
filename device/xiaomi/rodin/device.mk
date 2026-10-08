@@ -14,6 +14,10 @@ PRODUCT_USE_VIRTUAL_AB := true
 PRODUCT_VIRTUAL_AB_OTA := true
 PRODUCT_VIRTUAL_AB_COMPRESSION := true
 
+# The device ships dynamic partitions (super). This is a product variable and
+# must not appear in BoardConfig.mk, which is board scope.
+PRODUCT_USE_DYNAMIC_PARTITIONS := true
+
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.product.device=rodin \
     ro.product.model=24129RT7CC \

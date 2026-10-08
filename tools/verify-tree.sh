@@ -171,6 +171,28 @@ else
     echo "  skip  no interpreter with PyYAML found (pip install pyyaml to enable this check)"
 fi
 
+note "board config scope"
+# AOSP marks these as readonly once board scope begins, so assigning one in
+# BoardConfig.mk aborts the build with "cannot assign to readonly variable".
+# This check exists because the first hosted build died exactly that way.
+readonly_vars="PRODUCT_USE_DYNAMIC_PARTITIONS PRODUCT_BUILD_SUPER_PARTITION PRODUCT_BUILD_SUPER_EMPTY_IMAGE"
+bad_scope=""
+for v in ${readonly_vars}; do
+    if grep -qE "^[[:space:]]*${v}[[:space:]]*[:+]?=[[:space:]]*" "${DEVICE_DIR}/BoardConfig.mk"; then
+        bad_scope="${bad_scope} ${v}"
+    fi
+done
+if [[ -z "${bad_scope}" ]]; then
+    pass "BoardConfig.mk leaves product variables to device.mk"
+else
+    fail "readonly product variable(s) assigned in BoardConfig.mk:${bad_scope}"
+fi
+if grep -qE "^[[:space:]]*PRODUCT_USE_DYNAMIC_PARTITIONS[[:space:]]*:=" "${DEVICE_DIR}/device.mk"; then
+    pass "device.mk enables dynamic partitions"
+else
+    fail "device.mk does not set PRODUCT_USE_DYNAMIC_PARTITIONS"
+fi
+
 note "recovery.fstab sanity"
 fstab="${DEVICE_DIR}/recovery/root/system/etc/recovery.fstab"
 if grep -qE '^/dev/block/by-name/userdata[[:space:]]+/data[[:space:]]+f2fs' "${fstab}"; then

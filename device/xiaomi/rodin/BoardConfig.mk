@@ -131,7 +131,9 @@ TARGET_COPY_OUT_VENDOR_DLKM := vendor_dlkm
 
 # Virtual A/B
 AB_OTA_UPDATER := true
-PRODUCT_USE_DYNAMIC_PARTITIONS := true
+# PRODUCT_USE_DYNAMIC_PARTITIONS is a product variable: assigning it here
+# aborts the build with "cannot assign to readonly variable". It is set in
+# device.mk instead, where product configuration belongs.
 BOARD_USES_METADATA_PARTITION := true
 BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
 BOARD_METADATAIMAGE_FILE_SYSTEM_TYPE := f2fs
