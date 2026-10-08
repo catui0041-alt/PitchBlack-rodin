@@ -81,6 +81,8 @@ PRODUCT_PACKAGES_DEBUG :=
 include \$(DEVICE_PATH)/device.mk
 all:
 	@echo \$(foreach c,\$(PRODUCT_COPY_FILES),\$(firstword \$(subst :, ,\$(c))))
+dests:
+	@echo \$(foreach c,\$(PRODUCT_COPY_FILES),\$(lastword \$(subst :, ,\$(c))))
 MAKE
 
 if ! command -v make >/dev/null 2>&1; then
@@ -108,6 +110,36 @@ else
             fi
         done
         [[ "${missing}" -eq 0 && "${dirs}" -eq 0 ]] && pass "all ${count} PRODUCT_COPY_FILES sources are regular files"
+
+        # The ramdisk root is not a blank slate: system/core/rootdir lays down
+        # symlinks first (odm/bin -> /vendor/odm/bin, bin -> /system/bin, …) and
+        # the recovery root is then produced by rsyncing that tree over it. A
+        # real file at one of those destinations makes rsync refuse to replace
+        # the directory with the symlink, which killed a build at 99%.
+        # /vendor, /product and /system_ext are symlinks only when the tree does
+        # not build those images itself, so those three depend on BoardConfig.
+        symlinked="bin/ etc/ cache/ odm/ sdcard/ vendor_dlkm/ odm_dlkm/ d/"
+        for img_var in BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE:vendor \
+                       BOARD_PRODUCTIMAGE_FILE_SYSTEM_TYPE:product \
+                       BOARD_SYSTEM_EXTIMAGE_FILE_SYSTEM_TYPE:system_ext; do
+            var="${img_var%%:*}"
+            dir="${img_var##*:}"
+            grep -qE "^[[:space:]]*${var}[[:space:]]*:=" "${DEVICE_DIR}/BoardConfig.mk" || symlinked="${symlinked} ${dir}/"
+        done
+        dests="$(make -s -f "${HARNESS}/harness.mk" dests 2>/dev/null)"
+        bad_dest=""
+        for d in ${dests}; do
+            for p in ${symlinked}; do
+                case "${d}" in
+                    "recovery/root/${p}"*) bad_dest="${bad_dest} ${d}" ;;
+                esac
+            done
+        done
+        if [[ -z "${bad_dest}" ]]; then
+            pass "no copy rule writes under a directory the ramdisk makes a symlink"
+        else
+            fail "copy rule(s) write under a ramdisk symlink:${bad_dest}"
+        fi
 
         # The .ta files are the reason the directory rule above exists: when the
         # directory is populated every file in it must be copied individually.

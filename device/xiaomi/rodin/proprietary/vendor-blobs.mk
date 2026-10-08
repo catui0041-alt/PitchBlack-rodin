@@ -33,10 +33,6 @@ RODIN_BLOB_PATHS := \
     vendor/lib64/libmigpese@2.0.so \
     vendor/lib64/vendor.xiaomi.hardware.aidl.mtdservice-V1-ndk.so \
     vendor/etc/hal_uuid_map_rodin.xml \
-    odm/bin/hw/vendor.xiaomi.hw.touchfeature-service-recovery \
-    odm/lib64/libtensorflowlite_touch_c.so \
-    odm/firmware/rodin_gtp_thp_config.ini \
-    odm/firmware/rodin_gtp_thp_config_vendor.ini \
     touch/lib64/android.frameworks.sensorservice-V1-ndk.so \
     touch/lib64/android.hardware.common-V2-ndk.so \
     touch/lib64/android.hardware.common.fmq-V1-ndk.so \
@@ -50,7 +46,26 @@ PRODUCT_COPY_FILES += $(foreach f,$(RODIN_BLOB_PATHS),\
     $(if $(wildcard $(DEVICE_PATH)/proprietary/$(f)),$(DEVICE_PATH)/proprietary/$(f):recovery/root/$(f)))
 
 # Blobs whose ramdisk location differs from their ROM location.
+#
+# The odm/ blobs are here rather than in RODIN_BLOB_PATHS on purpose. AOSP's
+# system/core/rootdir fills the ramdisk root with symlinks before the recovery
+# root is assembled:
+#
+#     odm/bin      -> /vendor/odm/bin      odm/firmware -> /vendor/odm/firmware
+#     odm/lib64    -> /vendor/odm/lib64    (etc/, app/, framework/, lib/, usr/)
+#     bin -> /system/bin   etc -> /system/etc   cache -> /data/cache
+#
+# The assembly then rsyncs that root tree over recovery/root with -a, so a real
+# directory at one of those destinations cannot be replaced by the symlink:
+# "could not make way for new symlink: root/odm/bin" / "cannot delete non-empty
+# directory", and the build dies at 99% in ramdisk_files-timestamp. Files for
+# the odm partition therefore go to system/ (visible at runtime whatever the
+# odm mount does), never to recovery/root/odm/**.
 RODIN_BLOB_REMAP := \
+    odm/bin/hw/vendor.xiaomi.hw.touchfeature-service-recovery:recovery/root/system/bin/vendor.xiaomi.hw.touchfeature-service-recovery \
+    odm/lib64/libtensorflowlite_touch_c.so:recovery/root/system/lib64/rodin-touch/libtensorflowlite_touch_c.so \
+    odm/firmware/rodin_gtp_thp_config.ini:recovery/root/system/etc/rodin-touch/rodin_gtp_thp_config.ini \
+    odm/firmware/rodin_gtp_thp_config_vendor.ini:recovery/root/system/etc/rodin-touch/rodin_gtp_thp_config_vendor.ini \
     vendor/lib64/ese_weaver.nxp.so:recovery/root/system/lib64/ese_weaver.nxp.so \
     vendor/lib64/libjc_keymint_transport.nxp.so:recovery/root/system/lib64/libjc_keymint_transport.nxp.so \
     vendor/lib64/libteecli.so:recovery/root/system/lib64/libteecli.so \
