@@ -73,9 +73,21 @@ device/xiaomi/rodin/tools/make-vendor-boot.sh
 # احتياط إلزامي أولاً
 adb reboot bootloader
 fastboot getvar current-slot
+fastboot getvar partition-size:vendor_boot     # يجب أن يطبع 0x4000000 (64 MiB)
 fastboot flash vendor_boot vendor_boot-rodin.img
 fastboot reboot recovery
 ```
+
+إن رفض البوت لودر الاسم المجرّد (رسالة "partition not found") فهذا **خطأ بلا كتابة**،
+واستعمل اسم الفتحة النشطة من `current-slot` (عادة `_a`):
+
+```bash
+fastboot flash vendor_boot_a vendor_boot-rodin.img
+```
+
+وتقبل بعض بوت لودرات MTK الصيغة `_ab` كما تفعل حزمة الفلاش الخاصة بالجهاز. كل هذه
+الأسماء تكتب **القسم نفسه**؛ لا تفلّش أي اسم آخر في هذه الجلسة، وبالخصوص
+`preloader`/`lk`/`bootloader` — فهنا فقط يوجد الهاردبريك الحقيقي.
 
 للرجوع:
 
