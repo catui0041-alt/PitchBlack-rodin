@@ -74,8 +74,10 @@ extract_var() {
             if ($0 !~ /\\$/) block = 0
             print line
         }
-    ' "${BLOBS_MK}" | awk 'NF' | sed 's/[[:space:]]*$//'
+    ' "${BLOBS_MK}" | awk 'NF' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
+# Note: the lists in vendor-blobs.mk are indented, so leading whitespace has to
+# go as well — a path that keeps it silently matches nothing on disk.
 
 mapfile -t BLOB_PATHS < <(extract_var RODIN_BLOB_PATHS)
 # The remap list is "source:destination"; only the source matters here.
