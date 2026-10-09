@@ -289,7 +289,15 @@ jobs:
           image="$PBRP_TOP/out/target/product/rodin/vendor_boot-rodin.img"
           test -f "$image"
           test "$(stat -c %s "$image")" -eq 67108864
-          sha256sum --check --strict "${image}.sha256"
+          # make-vendor-boot.sh writes the checksum beside the image under a
+          # bare file name, so that it verifies in place once the artifact is
+          # unzipped. `sha256sum --check` resolves that name against the
+          # current directory, so read it from the image's own directory: run
+          # from the workspace root this failed with "No such file or
+          # directory" in step 17, after the build and the signing had both
+          # already succeeded, and threw the finished image away.
+          test -f "${image}.sha256"
+          ( cd "$(dirname "${image}")" && sha256sum --check --strict "$(basename "${image}").sha256" )
           python3 "$GITHUB_WORKSPACE/device-tree/device/xiaomi/rodin/tools/vendor_boot_tool.py" info "$image"
           avbtool="$PBRP_TOP/out/host/linux-x86/bin/avbtool"
           if [ -x "$avbtool" ] && [ "${{ inputs.sign_image }}" != "false" ]; then

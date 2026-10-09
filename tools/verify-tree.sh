@@ -239,6 +239,35 @@ else
     pass "workflow keeps .repo/manifests while dropping the object stores"
 fi
 
+# make-vendor-boot.sh writes the digest beside the image under a bare file name,
+# so that `sha256sum -c vendor_boot-rodin.img.sha256` works in place once the
+# artifact is unzipped. `sha256sum --check` resolves that name against the
+# current directory, so the workflow has to read the file from the image's own
+# directory: step 17 checked it from the workspace root and died with "No such
+# file or directory" after step 15 and step 16 had both already succeeded, and
+# the finished image was thrown away.
+if grep -qE 'cd "\$\(dirname "\$\{?OUT_IMAGE\}?"\)"' \
+        "${REPO_DIR}/device/xiaomi/rodin/tools/make-vendor-boot.sh"; then
+    pass "make-vendor-boot.sh writes the checksum file beside the image"
+else
+    fail "make-vendor-boot.sh no longer writes the checksum beside the image"
+fi
+sha_lines=0
+sha_offenders=0
+while IFS= read -r line; do
+    [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+    [[ "${line}" == *"sha256sum --check"* ]] || continue
+    sha_lines=$((sha_lines + 1))
+    [[ "${line}" == *'cd "$(dirname'* ]] || sha_offenders=$((sha_offenders + 1))
+done < "${workflow}"
+if (( sha_lines == 0 )); then
+    fail "the workflow never verifies the checksum of the built image"
+elif (( sha_offenders == 0 )); then
+    pass "the image checksum is checked from the image's own directory"
+else
+    fail "${sha_offenders} sha256sum --check line(s) run outside the image directory"
+fi
+
 note "board config scope"
 # AOSP marks these as readonly once board scope begins, so assigning one in
 # BoardConfig.mk aborts the build with "cannot assign to readonly variable".
