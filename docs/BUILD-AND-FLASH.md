@@ -11,11 +11,11 @@ bash tools/extract-prebuilts.sh <مجلد يحتوي boot.img و vendor_boot.img
 إن لم تمرّر مساراً، يُجرّب تلقائياً:
 `/storage/emulated/0/HyperOS.4.0.3.0.Rodin.CN/images`.
 
-المخرجات المتوقعة (من دامب CN ‏OS3.0.303):
+المخرجات المتوقعة (من دامب الفلاشة المثبّتة — حاليًا عالمي `OS3.0.302.0.WOJMIXM`):
 
 ```
-prebuilt/kernel                    17,184,688 بايت  (lz4 legacy)
-prebuilt/vendor_ramdisk00          29,231,353 بايت  (lz4 legacy)
+prebuilt/kernel                    17,184,688 بايت  (lz4 legacy — من الإصدار السابق، لا يُضمَّن في البناء)
+prebuilt/vendor_ramdisk00          29,241,054 بايت  (lz4 legacy، 244 وحدة بنواة 6.6.118)
 prebuilt/dtb/mt6899-rodin.dtb        444,841 بايت  (FDT)
 prebuilt/dtb/mt6899-rodin.dtb.mtk-wrapped  نسخة بالحاوية الأصلية للمقارنة
 prebuilt/vendor_boot_stock.img      67,108,864 بايت (شبكة الأمان للرجوع)

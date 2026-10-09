@@ -24,6 +24,7 @@ CHECKS=0
 pass() { CHECKS=$((CHECKS + 1)); printf '  ok    %s\n' "$1"; }
 fail() { CHECKS=$((CHECKS + 1)); FAILURES=$((FAILURES + 1)); printf '  FAIL  %s\n' "$1"; }
 note() { printf '\n== %s\n' "$1"; }
+warn() { printf '  warn  %s\n' "$1"; }
 
 note "required files"
 required=(
@@ -387,6 +388,46 @@ else
                 pass "the platform ramdisk holds the ${expected_modules} kernel modules the prune asserts"
             else
                 fail "the prune asserts ${expected_modules} platform modules but the ramdisk holds ${modules}"
+            fi
+
+            # A module built for another kernel revision can never load: the
+            # kernel compares vermagic before it looks at anything else. That is
+            # how a build that passes every other check ends up with no touch —
+            # or, when it is the platform fragment that is stale, no storage and
+            # a boot loop after the logo. Compare the recovery modules in the
+            # tree against the modules inside the platform ramdisk they will run
+            # next to. Reported as a warning, not a failure: the matching
+            # modules only exist inside the firmware dump on the device.
+            sample_module="$(grep -E '^lib/modules/[^/]+[.]ko$' <<< "${members}" | head -1)"
+            platform_vermagic=""
+            if [[ -n "${sample_module}" ]]; then
+                extract_dir="${HARNESS}/platform-module"
+                rm -rf "${extract_dir}"
+                if python3 "${DEVICE_DIR}/tools/vendor_ramdisk.py" extract \
+                        "${platform_ramdisk}" --to "${extract_dir}" \
+                        --match "$(basename "${sample_module}")" >/dev/null 2>&1; then
+                    platform_vermagic="$(grep -ao 'vermagic=[^[:space:]]*' \
+                        "${extract_dir}/$(basename "${sample_module}")" | head -1 | cut -d= -f2)"
+                fi
+            fi
+            if [[ -z "${platform_vermagic}" ]]; then
+                echo "  skip  could not read vermagic out of ${platform_ramdisk}"
+            else
+                mismatched=""
+                for m in "${DEVICE_DIR}"/prebuilt/modules/*.ko; do
+                    [[ -e "${m}" ]] || continue
+                    module_vermagic="$(grep -ao 'vermagic=[^[:space:]]*' "${m}" | head -1 | cut -d= -f2)"
+                    [[ "${module_vermagic}" == "${platform_vermagic}" ]] || \
+                        mismatched="${mismatched} $(basename "${m}")"
+                done
+                if [[ -z "${mismatched}" ]]; then
+                    pass "the recovery modules match the platform ramdisk's kernel (${platform_vermagic})"
+                else
+                    warn "prebuilt/modules was built for another kernel revision:${mismatched}"
+                    warn "  platform ramdisk vermagic: ${platform_vermagic}"
+                    warn "  every insmod of these will fail on a device running this firmware;"
+                    warn "  re-pull them from the installed revision (vendor_dlkm inside super.img)"
+                fi
             fi
 
             # The boot-time trap: a device manifest below /system keeps
