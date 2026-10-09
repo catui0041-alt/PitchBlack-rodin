@@ -14,8 +14,9 @@
 #      from ever starting. Dropping the first is what makes a PBRP-sized
 #      fragment fit at all; escaping the second is what makes decryption work.
 #   3. assembles the pruned platform ramdisk, the recovery fragment and the
-#      stock DTB with tools/vendor_boot_tool.py, pads to the exact vendor_boot
-#      partition size and signs the result with avbtool
+#      stock DTB with tools/vendor_boot_tool.py and signs the result with
+#      avbtool, which pads the image out to the exact vendor_boot partition
+#      size while it writes its AVB hash footer
 #
 # Usage (from the root of the PBRP source tree):
 #   device/xiaomi/rodin/tools/make-vendor-boot.sh \
@@ -29,6 +30,15 @@ DEVICE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TOP_DIR="$(cd "${DEVICE_DIR}/../../.." && pwd)"
 
 PARTITION_SIZE=67108864
+# avbtool writes its hash footer into the last bytes of the partition, so the
+# image handed to it must stop that far short of the end; signing pads the rest
+# with zeros. Measured for SHA256_RSA4096 at a 4096-byte page size (0x11000):
+# an image of the full 67108864 bytes fails with "Image size ... exceeds
+# maximum image size of 67039232 in order to fit in a partition size of ...".
+AVB_FOOTER_RESERVE=69632
+# The ramdisk table, page alignment and the bootconfig section sit between the
+# last ramdisk byte and the end of the partition.
+ALIGNMENT_RESERVE=$((16 * 1024))
 PRODUCT_OUT="${OUT_DIR:-${TOP_DIR}/out}/target/product/rodin"
 RECOVERY_ROOT="${PRODUCT_OUT}/recovery/root"
 STOCK_IMAGE="${DEVICE_DIR}/prebuilt/vendor_boot_stock.img"
@@ -176,8 +186,7 @@ lz4 -l -12 --favor-decSpeed < "${WORK}/platform-pruned.cpio" > "${PRUNED_PLATFOR
 PLATFORM_STOCK_SIZE="$(stat -c %s "${PLATFORM_RAMDISK}")"
 PLATFORM_SIZE="$(stat -c %s "${PRUNED_PLATFORM}")"
 DTB_SIZE="$(stat -c %s "${DTB}")"
-RESERVE=$((64 * 1024))   # ramdisk table + vbmeta + alignment slack
-BUDGET=$((PARTITION_SIZE - PLATFORM_SIZE - DTB_SIZE - 64 - RESERVE))
+BUDGET=$((PARTITION_SIZE - PLATFORM_SIZE - DTB_SIZE - AVB_FOOTER_RESERVE - ALIGNMENT_RESERVE))
 printf '   platform ramdisk: %s -> %s bytes, %s modules kept\n' \
     "${PLATFORM_STOCK_SIZE}" "${PLATFORM_SIZE}" "${modules}"
 printf '   budget for the recovery fragment: %s bytes (%.1f MiB)\n' \
@@ -208,11 +217,19 @@ fi
 
 # ------------------------------------------------------------- repack
 echo "== assembling vendor_boot"
+# A signed image is not padded to the partition size here: avbtool needs the
+# room at the end for its hash footer, and it pads the image itself. Packing a
+# full-size image first is what made the signing step fail with "Image size of
+# 67108864 exceeds maximum image size of 67039232". An unsigned image is
+# padded, because then it is the image to flash.
+pad_flag=""
+if [[ "${SIGN}" == "1" ]]; then pad_flag="--no-pad"; fi
 python3 "${SCRIPT_DIR}/vendor_boot_tool.py" rebuild "${STOCK_IMAGE}" "${WORK}/vendor_boot.img" \
     --platform "${PRUNED_PLATFORM}" \
     --recovery "${RAMDISK}" \
     --dtb "${DTB}" \
     --size "${PARTITION_SIZE}" \
+    ${pad_flag} \
     --strip-vbmeta
 
 # ------------------------------------------------------------- signing
@@ -221,7 +238,14 @@ if [[ "${SIGN}" == "1" ]]; then
     KEY="${TOP_DIR}/external/avb/test/data/testkey_rsa4096.pem"
     [[ -x "${AVBTOOL}" ]] || die "missing ${AVBTOOL}; build avbtool first (mka avbtool)"
     [[ -f "${KEY}" ]] || die "missing AVB test key ${KEY}"
+    CONTENT_SIZE="$(stat -c %s "${WORK}/vendor_boot.img")"
+    MAX_CONTENT=$((PARTITION_SIZE - AVB_FOOTER_RESERVE))
+    if (( CONTENT_SIZE > MAX_CONTENT )); then
+        die "the assembled image is ${CONTENT_SIZE} bytes, but avbtool needs it at or under ${MAX_CONTENT} so that its ${AVB_FOOTER_RESERVE}-byte footer still fits in the ${PARTITION_SIZE}-byte partition"
+    fi
     echo "== signing"
+    printf '   content: %s bytes (limit %s before the AVB footer)\n' \
+        "${CONTENT_SIZE}" "${MAX_CONTENT}"
     "${AVBTOOL}" add_hash_footer \
         --image "${WORK}/vendor_boot.img" \
         --partition_name vendor_boot \

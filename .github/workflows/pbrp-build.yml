@@ -333,7 +333,10 @@ jobs:
           retention-days: 14
 
       - name: Save compiler cache
-        if: ${{ success() && steps.ccache_restore.outputs.cache-hit != 'true' }}
+        # Save even when a later step fails: assembling and signing run after the
+        # compile, so a failure there used to throw away the whole 50-minute
+        # compile and make every retry start cold again.
+        if: ${{ !cancelled() && steps.ccache_restore.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v4
         with:

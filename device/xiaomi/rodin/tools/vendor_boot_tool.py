@@ -24,6 +24,12 @@ Usage
 `rebuild` without --recovery reproduces the source byte for byte (this is the
 self-test used by tools/verify-tree.sh).
 
+Pass --no-pad when the image is going to be signed afterwards. avbtool writes
+its hash footer into the tail of the partition, so it refuses an image that
+already fills the partition ("Image size of 67108864 exceeds maximum image size
+of 67039232"); --no-pad writes just the page-aligned content and lets avbtool
+pad it out to the partition size.
+
 Header layout is the AOSP vendor boot image header v4:
     0x000 magic "VNDRBOOT"
     0x008 header_version, 0x00C page_size
@@ -121,7 +127,7 @@ class VendorBoot:
               % (self.entry_num, self.table_size, self.table_start))
 
     # -- packing -----------------------------------------------------------
-    def pack(self, ramdisks, dtb_blob, out_size=None, tail=None):
+    def pack(self, ramdisks, dtb_blob, out_size=None, tail=None, pad=True):
         """Rebuild the image. `ramdisks` is a list of dicts with name/type/data.
 
         `tail` is copied verbatim after the ramdisk table. The stock image parks
@@ -130,6 +136,10 @@ class VendorBoot:
         b"" to write an unsigned image instead; a rebuild that changes any size
         must be signed again with avbtool, because the hash descriptors in the
         stock vbmeta no longer cover the new contents.
+
+        `out_size` is the partition limit the result has to stay inside; with
+        `pad` the image is padded with zeros up to it (a flashable, unsigned
+        image), without it only the page alignment the format requires.
         """
         table_entry = b""
         for index, entry in enumerate(ramdisks):
@@ -164,15 +174,16 @@ class VendorBoot:
         out += b"\x00" * (self.bootconfig_size and
                           align(len(out) + self.bootconfig_size, self.page_size) - len(out))
 
-        target = out_size or self.size
+        limit = out_size or self.size
         if tail is None:
             tail = self.raw[self.bootconfig_start:]
-        if len(out) + len(tail) > target:
+        if len(out) + len(tail) > limit:
             raise SystemExit(
                 "error: the rebuilt image needs %d bytes but the partition is %d "
                 "(shrink the recovery ramdisk or pass --strip-vbmeta)"
-                % (len(out) + len(tail), target)
+                % (len(out) + len(tail), limit)
             )
+        target = limit if pad else len(out) + len(tail)
         out += tail
         out += b"\x00" * (target - len(out))
         return bytes(out)
@@ -201,7 +212,12 @@ def main():
     rebuild.add_argument("--dtb", help="replace the wrapped DTB blob with this file "
                                        "(a bare FDT is wrapped the same way as the source)")
     rebuild.add_argument("--size", type=int, default=None,
-                         help="output size, defaults to the input size")
+                         help="output size, defaults to the input size; without "
+                              "--no-pad the image is padded up to it")
+    rebuild.add_argument("--no-pad", action="store_true",
+                         help="write only the page-aligned content instead of "
+                              "padding to --size; avbtool needs that room for "
+                              "its footer when the image is signed afterwards")
     rebuild.add_argument("--strip-vbmeta", action="store_true",
                          help="do not carry the stock embedded vbmeta/footer over")
 
@@ -256,7 +272,8 @@ def main():
             dtb_blob = dtb_data
 
     packed = image.pack(ramdisks, dtb_blob, args.size,
-                        tail=b"" if args.strip_vbmeta else None)
+                        tail=b"" if args.strip_vbmeta else None,
+                        pad=not args.no_pad)
     with open(args.output, "wb") as fh:
         fh.write(packed)
     print("wrote %s (%d bytes)" % (args.output, len(packed)))

@@ -9,6 +9,7 @@
 #   * the wildcard logic in device.mk/proprietary picks files up when present
 #   * the CI workflow is valid YAML
 #   * files that get executed carry the executable bit in the commit
+#   * the image handed to avbtool leaves room for the AVB hash footer
 #
 # Run from anywhere:  tools/verify-tree.sh
 #
@@ -375,6 +376,68 @@ else
                 fail "make-vendor-boot.sh packs the stock platform fragment again"
             fi
         fi
+    fi
+fi
+
+note "AVB footer room"
+# avbtool writes its hash footer into the tail of the partition, so the image it
+# signs has to stop 69632 bytes short of the partition end. That number is not
+# obvious and the failure only shows after a full 50-minute build:
+#   avbtool: Adding hash_footer failed: Image size of 67108864 exceeds maximum
+#   image size of 67039232 in order to fit in a partition size of 67108864.
+# The packer is therefore told to write just the page-aligned content
+# (--no-pad) when the result will be signed, and avbtool pads it back to the
+# partition size; an unsigned image keeps the full padding, because then it is
+# the image that gets flashed.
+boot_tool="${DEVICE_DIR}/tools/vendor_boot_tool.py"
+reserve="$(sed -n 's/^AVB_FOOTER_RESERVE=\([0-9][0-9]*\).*/\1/p' "${boot_script}" | head -1)"
+if [[ -n "${reserve}" ]] && (( reserve >= 69632 )); then
+    pass "make-vendor-boot.sh reserves ${reserve} bytes for the AVB footer"
+else
+    fail "make-vendor-boot.sh no longer reserves room for the AVB footer"
+fi
+if grep -q '^BUDGET=.*AVB_FOOTER_RESERVE' "${boot_script}"; then
+    pass "the fragment budget accounts for the AVB footer"
+else
+    fail "the fragment budget ignores the AVB footer, so an oversized fragment would fail at signing instead"
+fi
+
+if grep -qF '"--no-pad"' "${boot_tool}" &&
+   grep -q 'pad=not args.no_pad' "${boot_tool}" &&
+   grep -q 'target = limit if pad else' "${boot_tool}"; then
+    pass "vendor_boot_tool.py can write an unpadded image for the signer"
+else
+    fail "vendor_boot_tool.py cannot write an unpadded image, so avbtool would have no room for its footer"
+fi
+
+rebuild_call="$(grep -A 7 'vendor_boot_tool.py" rebuild' "${boot_script}")"
+if grep -q 'pad_flag="--no-pad"' "${boot_script}" && grep -qF '${pad_flag}' <<< "${rebuild_call}"; then
+    pass "the signer gets an unpadded image while an unsigned build stays padded"
+else
+    fail "make-vendor-boot.sh pads the image to the full partition before signing, which avbtool refuses"
+fi
+
+stock_image="${DEVICE_DIR}/prebuilt/vendor_boot_stock.img"
+if [[ ! -s "${stock_image}" ]]; then
+    echo "  skip  prebuilt/vendor_boot_stock.img is missing, cannot exercise --no-pad"
+elif ! command -v python3 >/dev/null 2>&1; then
+    echo "  skip  python3 is missing, cannot exercise --no-pad"
+else
+    padded="${HARNESS}/padded.img"
+    unpadded="${HARNESS}/unpadded.img"
+    if python3 "${boot_tool}" rebuild "${stock_image}" "${padded}" --strip-vbmeta >/dev/null 2>&1 &&
+       python3 "${boot_tool}" rebuild "${stock_image}" "${unpadded}" --strip-vbmeta --no-pad >/dev/null 2>&1; then
+        padded_size="$(stat -c %s "${padded}")"
+        unpadded_size="$(stat -c %s "${unpadded}")"
+        if (( padded_size == 67108864 && unpadded_size < 67108864 )) &&
+           (( unpadded_size + ${reserve:-0} <= 67108864 )) &&
+           python3 "${boot_tool}" info "${unpadded}" >/dev/null 2>&1; then
+            pass "--no-pad leaves the footer room: ${unpadded_size} bytes unpadded, ${padded_size} padded"
+        else
+            fail "--no-pad did not stop the padding (${unpadded_size} vs ${padded_size} bytes)"
+        fi
+    else
+        fail "vendor_boot_tool.py cannot rebuild the stock prebuilt image"
     fi
 fi
 
