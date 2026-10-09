@@ -136,6 +136,31 @@ image size of 67039232 in order to fit in a partition size of 67108864.
 موجود، الأساسي ينجو، عدد الوحدات صحيح) لأن خطأً حرفياً في هذه القائمة لا
 يظهر إلا على الجهاز.
 
+### لماذا يُتحقَّق من الصورة في مجلد مستقل
+
+خطوة 17 («Validate the image») فشلت في التشغيل 37890803758 **بعد** نجاح
+البناء (خطوة 15) والتوقيع (خطوة 16):
+
+```
+sha256 digest of .../out/target/product/rodin/vendor_boot.img does not match digest in descriptor
+.../avbtool: Error verifying descriptor.
+vbmeta: Successfully verified footer and SHA256_RSA4096 vbmeta struct in .../vendor_boot-rodin.img
+```
+
+السبب ليس في الصورة: avbtool يقرأ وصف التوقيع (hash descriptor) للتحقق منه
+من ملف باسم `اسم_القسم.img` **داخل مجلد الصورة نفسها**
+(`AvbHashDescriptor.verify` في `avbtool.py`). وصورتنا تُجمَّع في
+`out/target/product/rodin/` حيث يوجد أيضاً ناتج البناء الوسيط
+`vendor_boot.img` — وهو ملف مختلف. فكان avbtool يقارن بصمة توقيعنا ببصمة
+ذلك الملف الوسيط ويفشل، بينما التوقيع والفوتر سليمان.
+
+الحل: تُنسخ الصورة إلى مجلد مؤقت باسم `vendor_boot.img` وحده، ويُتحقَّق منها
+هناك. أُعيد إنتاج الفشل والنجاح محلياً بأداة AOSP `avbtool 1.3.0` قبل الدفع:
+التحقق بجانب ملف `vendor_boot.img` آخر يعطي نفس الرسالة أعلاه مع خروج 1،
+والتحقق من النسخة المعزولة يعطي `Successfully verified sha256 hash` مع خروج 0.
+و`tools/verify-tree.sh` يفحص الآن أن الخطوة تُعزل النسخة بهذا الاسم، وأن
+الاسم يطابق `--partition_name` في سكربت التوقيع.
+
 ## آلية التسليم
 
 ```

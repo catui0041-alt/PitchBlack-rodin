@@ -301,7 +301,19 @@ jobs:
           python3 "$GITHUB_WORKSPACE/device-tree/device/xiaomi/rodin/tools/vendor_boot_tool.py" info "$image"
           avbtool="$PBRP_TOP/out/host/linux-x86/bin/avbtool"
           if [ -x "$avbtool" ] && [ "${{ inputs.sign_image }}" != "false" ]; then
-            "$avbtool" verify_image --image "$image"
+            # avbtool checks a hash descriptor's digest against the file named
+            # after the descriptor's partition name, inside the directory of the
+            # image it was handed (AvbHashDescriptor.verify in avbtool.py). For
+            # vendor_boot-rodin.img that file is out/target/product/rodin/
+            # vendor_boot.img -- the build's own intermediate, a different image
+            # -- so verifying in place failed with "sha256 digest of .../
+            # vendor_boot.img does not match digest in descriptor" even though
+            # the signature and the footer verified fine. Hand avbtool a copy
+            # that is the only vendor_boot.img in its directory.
+            verify_dir="$(mktemp -d)"
+            cp -f "$image" "$verify_dir/vendor_boot.img"
+            "$avbtool" verify_image --image "$verify_dir/vendor_boot.img"
+            rm -rf "$verify_dir"
           fi
 
       - name: Collect the artifact

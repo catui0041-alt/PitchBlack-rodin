@@ -9,7 +9,8 @@
 #   * the wildcard logic in device.mk/proprietary picks files up when present
 #   * the CI workflow is valid YAML
 #   * files that get executed carry the executable bit in the commit
-#   * the image handed to avbtool leaves room for the AVB hash footer
+#   * the image handed to avbtool leaves room for the AVB hash footer, and is
+#     verified from a directory where avbtool resolves it to itself
 #
 # Run from anywhere:  tools/verify-tree.sh
 #
@@ -468,6 +469,50 @@ else
     else
         fail "vendor_boot_tool.py cannot rebuild the stock prebuilt image"
     fi
+fi
+
+note "AVB verification path"
+# avbtool resolves the payload of a hash descriptor as
+# <directory-of-the-image>/<partition_name>.img (AvbHashDescriptor.verify in
+# avbtool.py). The image is assembled into out/target/product/rodin/, right next
+# to the build's own vendor_boot.img, so verifying it there hashes that other
+# file and fails with
+#   sha256 digest of .../vendor_boot.img does not match digest in descriptor
+# after a 40-minute build and a signing that worked. The validate step has to
+# verify a copy that is the only vendor_boot.img in its directory.
+validate_step="${HARNESS}/validate-step.txt"
+if [[ -n "${YAML_PY}" ]]; then
+    if "${YAML_PY}" - "${workflow}" > "${validate_step}" <<'PY'
+import sys, yaml
+with open(sys.argv[1]) as fh:
+    data = yaml.safe_load(fh)
+for step in data["jobs"]["build"]["steps"]:
+    if step.get("name") == "Validate the image":
+        sys.stdout.write(step["run"])
+        break
+else:
+    sys.exit("no Validate the image step")
+PY
+    then
+        if grep -q 'verify_dir="\$(mktemp -d)"' "${validate_step}" &&
+           grep -qF 'cp -f "$image" "$verify_dir/' "${validate_step}" &&
+           grep -qF 'verify_image --image "$verify_dir/' "${validate_step}"; then
+            pass "the validate step verifies the image in a directory of its own"
+        else
+            fail "avbtool verifies the image beside the build's own vendor_boot.img, where it compares the footer against a different file"
+        fi
+        partition_name="$(sed -n 's/^[[:space:]]*--partition_name[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p' "${boot_script}" | head -1)"
+        copy_name="$(sed -n 's/.*verify_dir\/\([A-Za-z0-9_-]*\.img\).*/\1/p' "${validate_step}" | head -1)"
+        if [[ -n "${partition_name}" && "${copy_name}" == "${partition_name}.img" ]]; then
+            pass "the verified copy is named after the signed partition (${copy_name})"
+        else
+            fail "the verified copy is ${copy_name:-nothing} but the descriptor names the ${partition_name:-unknown} partition, so avbtool would never look at the image it just signed"
+        fi
+    else
+        echo "  skip  could not read the validate step out of the workflow"
+    fi
+else
+    echo "  skip  no interpreter with PyYAML found, cannot read the validate step"
 fi
 
 note "exec bits"
