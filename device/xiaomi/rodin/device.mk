@@ -74,13 +74,17 @@ PRODUCT_COPY_FILES += \
 # first_stage_ramdisk fstab (used while the vendor ramdisk mounts partitions
 # before the recovery UI starts).
 #
-# The stock recovery ramdisk calls this file fstab.emmc, while ro.hardware on
-# this board resolves to mt6899. Both names are shipped from the single source
-# file so first-stage init finds the table either way; verified against the
-# stock vendor_boot on the device.
+# Only fstab.emmc is installed from here, exactly like the stock recovery
+# fragment. fstab.mt6899 must NOT be installed: the recovery fragment is
+# concatenated after the platform fragment, so a copy here replaces the
+# firmware's own first-stage table for ro.hardware=mt6899. That table is what
+# carries mi_ext, the 25 product/system overlay mounts and the avb_keys list
+# for this HyperOS build; the trimmed tree copy dropped all of it and the
+# device sat on the POCO logo instead of booting. The platform fragment
+# already ships the real fstab.mt6899, and make-vendor-boot.sh refuses to
+# pack a recovery fragment that shadows it.
 ifneq ($(wildcard $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899),)
 PRODUCT_COPY_FILES += \
-    $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899:recovery/root/first_stage_ramdisk/fstab.mt6899 \
     $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899:recovery/root/first_stage_ramdisk/fstab.emmc
 endif
 

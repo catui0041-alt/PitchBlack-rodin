@@ -73,6 +73,37 @@ bash device/xiaomi/rodin/tools/make-vendor-boot.sh
 > بعد نجاح البناء كاملاً. السكربتات التنفيذية محفوظة بـ mode 100755 في
 > الفهرسه (`bash tools/verify-tree.sh` يفحص ذلك).
 
+## 3.5) النسخ الأربع
+
+`make-vendor-boot.sh` ينتج الآن أربع صور في `out/target/product/rodin/`:
+
+| الصورة | متى تُستعمل |
+|---|---|
+| `vendor_boot-rodin-HOS-AVB-ENABLED.img` | روم هايبر/ستوك بتوقيع AVB الطبيعي |
+| `vendor_boot-rodin-HOS-AVB-DISABLED.img` | روم يتطلب تعطيل AVB في المرحلة الأولى |
+| `vendor_boot-rodin-AOSP-AVB-ENABLED.img` | روم AOSP — يحتاج `prebuilt/aosp/` |
+| `vendor_boot-rodin-AOSP-AVB-DISABLED.img` | روم AOSP مع AVB معطّل |
+
+نسخ `AVB-DISABLED` لا تكتب أي شيء في bootconfig؛ الفرق الوحيد أنها مُجرَّدة من
+`avb`/`avb_keys` في `first_stage_ramdisk/**/fstab.*` داخل كلا الجزئين (الـplatform
+والاسترجاع)، ثم يُعاد ضغط الـplatform كما هو. هذا يطابق ما يفعله المرجع المُتحقَّق
+منه على نفس اللوح.
+
+> **تحذير الجدول الأول**: لا تجعل أي ملف داخل قطعة الاسترجاع يحمل نفس مسار ملف
+> في قطعة الـplatform (خصوصاً `first_stage_ramdisk/fstab.mt6899`)؛ فالأجزاء تُفكّ
+> بالترتيب وملف الاسترجاع يحجب ملف الفيرموير — وهو سبب التوقف عند لوجو POCO.
+
+لزوج AOSP، استورد مدخلاته من `vendor_boot.img` الخاص بالروم أولاً (لا يُخلط
+أبداً مع جزء هايبر):
+
+```bash
+bash device/xiaomi/rodin/tools/import-aosp-vendor-boot.sh /path/to/rom/vendor_boot.img
+# ثم نفس الأمر أعلاه؛ يبني الأربع
+```
+
+خيارات: `--profile hos|aosp|all` (افتراضياً all)، `--out-dir`، `--no-avb` (بلا
+أي AVB footer).
+
 ## 4) الفلاش
 
 ```bash
@@ -80,9 +111,12 @@ bash device/xiaomi/rodin/tools/make-vendor-boot.sh
 adb reboot bootloader
 fastboot getvar current-slot
 fastboot getvar partition-size:vendor_boot     # يجب أن يطبع 0x4000000 (64 MiB)
-fastboot flash vendor_boot vendor_boot-rodin.img
+fastboot flash vendor_boot_a vendor_boot-rodin-HOS-AVB-ENABLED.img
 fastboot reboot recovery
 ```
+
+اسم القسم المطلوب: `vendor_boot_a` أو `vendor_boot_b` (الفتحة النشطة من
+`current-slot`). لا تستعمل `vendor_boot_ab`.
 
 إن رفض البوت لودر الاسم المجرّد (رسالة "partition not found") فهذا **خطأ بلا كتابة**،
 واستعمل اسم الفتحة النشطة من `current-slot` (عادة `_a`):
@@ -95,11 +129,16 @@ fastboot flash vendor_boot_a vendor_boot-rodin.img
 الأسماء تكتب **القسم نفسه**؛ لا تفلّش أي اسم آخر في هذه الجلسة، وبالخصوص
 `preloader`/`lk`/`bootloader` — فهنا فقط يوجد الهاردبريك الحقيقي.
 
-للرجوع:
+للرجوع (الصورة التي يعمل بها الجهاز فعلاً — خط الأساس المُعاد):
 
 ```bash
-fastboot flash vendor_boot device/xiaomi/rodin/prebuilt/vendor_boot_stock.img
+fastboot flash vendor_boot_a device/xiaomi/rodin/prebuilt/vendor_boot_stock.img
 ```
+
+> خط الأساس الحالي = `OS3.0.8.0.WOJMIXM` (`f3e58747…`، وحداته 6.6.89) حسب طلبك.
+> لو تكرّر البوتلوب فالمتوقع هو تعارض `vermagic` مع نواة الجهاز 6.6.118:
+> أعد سحب الجزء من الفلاشة المثبّتة، أو اطلب نسخة مبنية على `d6921924…`
+> (موجودة في `git show fd75634:device/xiaomi/rodin/prebuilt/vendor_boot_stock.img`).
 
 ## 5) أدوات التشخيص
 
@@ -115,6 +154,16 @@ cmp /tmp/rt.img prebuilt/vendor_boot_stock.img && echo "الأداة سليمة"
 
 ## تحذيرات أخيرة
 
+* **لا تتجاوز 62,000,000 بايت للـ ramdisk المشترك** (platform + recovery مضغوطين).
+  تجاوزه = بوتلوب فوري بلا رسالة؛ السكربت يرفض البناء في هذه الحالة. قطعة
+  الـplatform تُنقل كما هي من الفيرموير وتُضغط `zstd -19` (~17.35 ميجا بدل
+  29.2)، فتبقى المساحة الكافية لقطعة الاسترجاع.
+* **لا تجعل ملفات الشجرة تحجب ملفات الـplatform**: قطعة الاسترجاع تُفكّ فوق
+  قطعة الـplatform، فأي `first_stage_ramdisk/fstab.mt6899` فيها يحلّ محل جدول
+  الفيرموير (فيه `mi_ext` والـoverlays و`avb_keys`) ويتوقف الجهاز عند اللوجو.
+  الشجرة تثبّت جدولها باسم `fstab.emmc` فقط، والسكربت يرفض غير ذلك.
+* **لا توقّع بمفتاح** — الصورة الأصلية `algorithm NONE`؛ التوقيع بمفتاح اختبار
+  يغيّر شكل vbmeta (2112 بدل 704 بايت) وهذا ما لا يعرفه البوت لودر.
 * الفلاش على جهاز **مفتوح البوت لودر** فقط.
 * لا تفلش `recovery.img` — الاسترجاع يسكن في `vendor_boot` على هذا اللوح.
 * أول إقلاع قد يفشل؛ لا تحذف `vendor_boot_stock.img` أبداً.

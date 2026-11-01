@@ -184,9 +184,15 @@ vendor_boot.img ─┬ platform ramdisk │→ البوت لودر يقلع reco
 | 4 | `PRODUCT_SHIPPING_API_LEVEL := 34` بينما الفلاشة Android 15/16 | ارفعه فقط إذا قبل الفرع ذلك؛ الرفع الخاطئ يكسر البناء |
 | 5 | فرق في مقاس `super`: 9,125,756,928 (شجرة LineageOS) مقابل 11,811,160,064 (المنفذ المرجعي) | لا يؤثر على الاسترجاع إطلاقاً (لا نبني super.img)، لكن وثّقتُ الفرق |
 | 6 | اختيار الفرع: `android-14.0` مقابل `android-12.1` | إذا فشل البناء على 14.0، أعد التشغيل على 12.1 (متوفّر كخيار في الـ workflow) |
+| 7 | لم يُطبَّق بعد: المرجع يحذف `mediatek,usb-offload` من `/soc/usb0@11201000/xhci0@11200000` في الـ DTB ليعمل USB/ADB داخل الاسترجاع | إن أقلع الاسترجاع بلا adb، هذا أول تعديل: أضف خطوة DTB مثل `tools/make-recovery-host-dtb.py` في المرجع (تحتاج `dtc`/`fdtget`/`fdtput`، وهي مثبّتة في الـ workflow) |
 
 ## عند فشل الإقلاع
 
+* **العلق عند لوجو POCO بلا إعادة تشغيل**: أول ما يُتفحّص هل قطعة الاسترجاع
+  تحجب ملفاً من قطعة الـplatform — خصوصاً `first_stage_ramdisk/fstab.mt6899`.
+  الأجزاء تُفكّ بالترتيب، فملف الاسترجاع يلغي جدول الفيرموير (mi_ext والـoverlays
+  و`avb_keys`) ويتوقف first-stage قبل الواجهة. الحارس في
+  `make-vendor-boot.sh` يمنع ذلك، و`tools/verify-tree.sh` يفحصه.
 * **لوجو يظهر ثم يختفي ويعيد الجهاز التشغيل (بلا أي رسالة)**: أول ما يُتفحّص
   `vermagic` لوحدات ramdisk المنصة مقابل نواة الجهاز المثبّتة. هذا هو العرض
   المميّز للفلاشة المبنية على إصدار آخر (انظر قسم الحادثة أدناه).
@@ -258,6 +264,91 @@ first-stage init في تحميل وحدات التخزين/العرض ⇒ panic 
    `SHA256_RSA4096` بمفتاح اختبار. لم يُثبَت قبول البوت لودر له، وهو المُتغيّر
    الثاني إن تكرّر البوتلوب بعد إصلاح الإصدار.
 
+## حادثة البوتلوب الثانية (2026-10-17) — السبب الحقيقي: حجم الـ ramdisk المشترك
+
+بعد إصلاح الإصدار (خط أساس `OS3.0.302.0`) بقي البوتلوب كما هو، وكذلك على خط
+الأساس `OS3.0.8.0` — أي أن الإصدار لم يكن السبب الوحيد. القياس الحاسم:
+
+| ما قِسناه | القيمة |
+|---|---|
+| الصورة الأصلية (تعمل) | platform 29,231,353 + recovery 14,145,147 = **43,376,500** بايت |
+| بناؤنا #16 و#17 (بوتلوب) | platform ~22,0xx,xxx + recovery 42,970,640 = **65,004,438** بايت |
+| المرجع OrangeFox (يقلع فعلاً) | platform 17.3 ميجا (zstd) + recovery ~37.4 ميجا = **~54.8 ميجا** |
+| حدّ العمل المعتمد لهذا اللوح | **< 62,000,000 بايت** للـ ramdisk المشترك |
+
+النواة تضع الـ initramfs عند `ramdisk_addr = 0x66f00000`؛ ما يتجاوز الحدّ
+يدخل في الحجز التالي ويُكتب فوق نفسه أثناء الفكّ، فيموت first-stage init قبل أن
+يطبع أي سطر — وهذا هو بالضبط «لوجو يظهر ثم يختفي ويعيد التشغيل بلا رسالة».
+
+الإصلاح المطبَّق في `make-vendor-boot.sh`:
+
+* **تقليم قطعة الاسترجاع** (0.5+ ميجا مضغوطة): خطوط اللغات غير الإنجليزية،
+  خطوط CJK (`DroidSansFallback`، `NotoSansCJKjp`، `RoboNoto-Medium`) مع حذف
+  تعريفاتها من `twres/ui.xml`، `magiskboot`، `bash`، `nano`،
+  `libprotobuf-cpp-lite`، `libclang_rt.ubsan`، وملفّا `ramdisk-files.*`.
+  البقاء المفروض: `init`، `system/bin/init`، `recovery`، `adbd`، `minadbd`،
+  `fastbootd`، `keystore2`، `libandroidicu`، مكتبات اللمس، `recovery.fstab`.
+  (القياسات في هذا القسم تخصّ الجيل السابق، حيث كان الحجم يُعالَج بالتقليم
+  وحده؛ انظر «حادثة البوتلوب الثالثة» لسبب تغيير المقاربة.)
+* **حراسة صريحة**: `COMBINED_RAMDISK_LIMIT=62000000` يفشل البناء بدل أن يقلع.
+* **التوقيع بنمط المخزون**: `avbtool add_hash_footer` بلا `--key` وبلا
+  `--algorithm` ⇒ `algorithm NONE` وvbmeta بحجم 704 بايت مثل الصورة الأصلية،
+  لا `SHA256_RSA4096` بمفتاح اختبار (2112 بايت) بمفتاح لا يعرفه البوت لودر.
+
+## حادثة البوتلوب الثالثة (2026-11-01) — الجذر: قطعة الاسترجاع تحجب جدول الفيرموير
+
+العلق عند لوجو POCO مع `vendor_boot-rodin-HOS-AVB-ENABLED-6.6.118.img` لم يكن
+حجماً ولا توقيعاً. السبب:
+
+* الصورة الأصلية تحمل في **قطعة الـplatform** جدول first-stage الحقيقي:
+  `first_stage_ramdisk/fstab.mt6899` بـ175 سطراً، فيه `mi_ext` و25 نقطة تركيب
+  overlay لـ`product`/`system` وقائمة `avb_keys`.
+* شجرة الجهاز كانت تُثبّت نسخة مقلَّمة منه (23 سطراً) باسم
+  `first_stage_ramdisk/fstab.mt6899` **داخل قطعة الاسترجاع**.
+* الأجزاء في ramdisk الخاص بـ`vendor_boot` تُفكّ فوق بعضها بالترتيب، فملف
+  الاسترجاع يحلّ محل ملف الـplatform — فيفقد first-stage كل نقاط mi_ext/overlay
+  ويتوقف قبل أن يصل إلى واجهة الاسترجاع.
+
+الإصلاح:
+
+* `device.mk` يثبّت جدول الشجرة باسم `first_stage_ramdisk/fstab.emmc` فقط —
+  تماماً كما يفعل المخزون (نسخته الوحيدة هناك هي `fstab.emmc`).
+* `make-vendor-boot.sh` يرفض البناء إذا وجد في قطعة الاسترجاع أي مسار يملكه
+  الـplatform (`FORBIDDEN_RECOVERY_PATHS`)، فلا يمكن إعادة الخطأ بصمت.
+* `tools/verify-tree.sh` يفحص ثلاثة أشياء: أن `device.mk` لا يثبّت
+  `fstab.mt6899`، وأن الحارس موجود، وأن `prebuilt/vendor_ramdisk00` نفسه يحمل
+  `mi_ext` و`lowerdir=/mnt/vendor/mi_ext`.
+
+وبنفس الحادثة تُرك تقليم الـplatform نهائياً:
+
+* قطعة الـplatform تُنقل **كما هي بايتاً ببايت** (نفس محتوى الفيرموير: init
+  والمكتبات وVINTF و244 وحدة نواة وجدول fstab الكامل)، ويُعاد ضغطها من LZ4 إلى
+  `zstd -19` فقط: 72,030,720 بايت ⇒ ~17.35 ميجا بلا تغيير في المحتوى.
+  هذا ما يفتح المكان لقطعة استرجاع بحجم PBRP.
+* قطعة الاسترجاع تبقى LZ4 كما في المخزون.
+* نواة 6.6.118 المثبّتة على الجهاز تفكّ initramfs المضغوط بـzstd (مُتحقَّق من
+  `boot.img` نفسه)، ولذلك عاد zstd مسموحاً بعد أن كان ممنوعاً في الجيل السابق.
+
+## أربع نسخ إصدار (2026-11-01)
+
+`make-vendor-boot.sh` ينشر أربع صور، والمحاذاة كما يلي:
+
+| الملف | PLATFORM | AVB |
+|---|---|---|
+| `vendor_boot-rodin-HOS-AVB-ENABLED.img` | `prebuilt/vendor_ramdisk00` كما هو، مضغوط `zstd -19` | hash footer غير موقَّع مثل المخزون |
+| `vendor_boot-rodin-HOS-AVB-DISABLED.img` | نفسه، مع تجريد `avb`/`avb_keys` من fstab الـplatform | hash footer، بلا bootconfig |
+| `vendor_boot-rodin-AOSP-AVB-ENABLED.img` | `prebuilt/aosp/vendor_ramdisk00` كما استُورد (LZ4) | مثل المخزون + bootconfig الروم |
+| `vendor_boot-rodin-AOSP-AVB-DISABLED.img` | نفسه بعد تجريد `avb` وإعادة ضغط LZ4 | مثل المخزون + bootconfig الروم |
+
+نسخ AVB-DISABLED لا تكتب أي تجاوز لحالة الإقلاع في bootconfig؛ التغيير الوحيد
+هو حذف `avb`/`avb_keys` من `first_stage_ramdisk/**/fstab.*` في الجزئين. هذا هو
+نفس ما يفعله المرجع المُتحقَّق منه على هذا اللوح.
+
+نسخ AOSP تحتاج مدخلاتها الخاصة (`prebuilt/aosp/vendor_ramdisk00` و`bootconfig`)
+تُستورد من `vendor_boot.img` الخاص بالروم عبر
+`tools/import-aosp-vendor-boot.sh`؛ لا تُبنى من جزء هايبر أبداً. إن غابت المدخلات
+يُبنى زوج HOS وحده ويُطبع سبب التخطي.
+
 ## الإسناد
 
 بنية البناء لهذا اللوح (نمط ramdisk الـ platform + FBE + حزم اللمس) مبنية على
@@ -272,3 +363,11 @@ first-stage init في تحميل وحدات التخزين/العرض ⇒ panic 
 
 المصادر الأخرى: شجرة `LineageOS`/`xiaomi-mt6899-dev` لجهاز rodin (قيم
 `BoardConfig` العامة)، ومستند `manifest_pb` الخاص بـ PBRP (بنية `pb_*.mk`).
+
+مرجع تصميم (تحليل فقط، بلا نسخ):
+
+* <https://github.com/NEESCHAL-3/OrangeFox-rodin-source> — منه أخذنا **الفكرة**
+  فقط: إبقاء قطعة الـplatform حرفياً وإعادة ضغطها `zstd -19`، حدّ 62,000,000
+  بايت، تجريد `avb`/`avb_keys` لنسخة AVB-DISABLED بلا تجاوز bootconfig، وموضع
+  جدول first-stage. لم يُنسخ منه أي ملف؛ أدوات هذه الشجرة مكتوبة من الصفر
+  ومُتحقَّق منها بـ`tools/verify-tree.sh`.

@@ -12,3 +12,9 @@ __pycache__/
 
 # blob collection cache (git clone of the reference port)
 .collect-cache/
+
+# Local-only files: never commit these. credit.md is the local attribution
+# note and vendor_boot.img at the repo root is the tester's own image.
+credit.md
+freebuff-chat-*.md
+/vendor_boot.img

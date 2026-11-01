@@ -125,9 +125,12 @@ class VendorBoot:
               % (self.dtb_size, self.dtb_start + self.dtb_delta, self.dtb_delta))
         print("ramdisk table    %d entries, %d bytes at 0x%x"
               % (self.entry_num, self.table_size, self.table_start))
+        print("bootconfig       %d bytes at 0x%x"
+              % (self.bootconfig_size, self.bootconfig_start))
 
     # -- packing -----------------------------------------------------------
-    def pack(self, ramdisks, dtb_blob, out_size=None, tail=None, pad=True):
+    def pack(self, ramdisks, dtb_blob, out_size=None, tail=None, pad=True,
+             bootconfig=None):
         """Rebuild the image. `ramdisks` is a list of dicts with name/type/data.
 
         `tail` is copied verbatim after the ramdisk table. The stock image parks
@@ -158,6 +161,8 @@ class VendorBoot:
         struct.pack_into("<I", header, 0x840, len(table_entry))
         struct.pack_into("<I", header, 0x844, len(ramdisks))
         struct.pack_into("<I", header, 0x848, self.entry_size)
+        if bootconfig is not None:
+            struct.pack_into("<I", header, 0x84C, len(bootconfig))
 
         out = bytearray()
         out += header
@@ -169,10 +174,17 @@ class VendorBoot:
         out += b"\x00" * (align(len(out), self.page_size) - len(out))
         out += table_entry
         out += b"\x00" * (align(len(out), self.page_size) - len(out))
-        # Empty bootconfig section; the tail below starts at the same offset the
-        # stock image uses for its vbmeta block.
-        out += b"\x00" * (self.bootconfig_size and
-                          align(len(out) + self.bootconfig_size, self.page_size) - len(out))
+        if bootconfig is not None:
+            # AOSP's mkbootimg writes the vendor bootconfig verbatim and pads it
+            # to a page; the header carries the unpadded length.
+            out += bootconfig
+            out += b"\x00" * (align(len(out), self.page_size) - len(out))
+        else:
+            # Keep the stock bootconfig section shape: zeros of the size the
+            # header declares, so the tail (the stock vbmeta block) starts where
+            # the stock image puts it.
+            out += b"\x00" * (self.bootconfig_size and
+                              align(len(out) + self.bootconfig_size, self.page_size) - len(out))
 
         limit = out_size or self.size
         if tail is None:
@@ -220,6 +232,9 @@ def main():
                               "its footer when the image is signed afterwards")
     rebuild.add_argument("--strip-vbmeta", action="store_true",
                          help="do not carry the stock embedded vbmeta/footer over")
+    rebuild.add_argument("--bootconfig",
+                         help="replace the vendor bootconfig section with this "
+                              "file (the text mkbootimg --vendor_bootconfig takes)")
 
     args = parser.parse_args()
 
@@ -271,9 +286,13 @@ def main():
         else:
             dtb_blob = dtb_data
 
+    bootconfig = None
+    if args.bootconfig:
+        with open(args.bootconfig, "rb") as fh:
+            bootconfig = fh.read()
     packed = image.pack(ramdisks, dtb_blob, args.size,
                         tail=b"" if args.strip_vbmeta else None,
-                        pad=not args.no_pad)
+                        pad=not args.no_pad, bootconfig=bootconfig)
     with open(args.output, "wb") as fh:
         fh.write(packed)
     print("wrote %s (%d bytes)" % (args.output, len(packed)))

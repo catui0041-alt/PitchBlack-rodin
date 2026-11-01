@@ -39,13 +39,28 @@ rodin ليس جهاز recovery تقليدي:
 النتيجة: **`vendor_boot.img` بحجم 67,108,864 بايت بالضبط** تُفلَش على قسم
 `vendor_boot`، ثم تقلع إلى الاسترجاع.
 
-### ميزانية الحجم (قيد حقيقي)
+### ميزانية الحجم (قيدان حقيقيان)
 
-قسم `vendor_boot` عندك 64 ميجا، ومنها 27.9 ميجا لـ ramdisk الـ platform +
-0.42 ميجا للـ DTB + ~1 كيلو للجدول وvbmeta. أي أن **الاسترجاع المبني يجب أن
-يبقى تحت 35.7 ميجا** (الأصلي كان 13.5 ميجا فقط!). `make-vendor-boot.sh` يقيس
-هذا ويفشل برسالة واضحة مع حلول قبل أن يرفض المجمّع الصورة. لهذا السبب لا ننسخ
-وحدات النواة كلها (244 وحدة = 30 ميجا).
+1. **القيد القاتل: الـ ramdisk المشترك < 62,000,000 بايت** (platform + recovery
+   مضغوطين). فوق هذا الحد يعيد الجهاز التشغيل بعد اللوجو بلا أي رسالة، لأن
+   النواة تفكّ الـ initramfs عند `0x66f00000` وتدخل في الحجز التالي. الصورة
+   الأصلية 43.4 ميجا. قطعة الـplatform الأصلية تُنقل كما هي وتُضغط `zstd -19`
+   (~17.35 ميجا بدل 29.2)، فتبقى المساحة لقطعة استرجاع بحجم PBRP (~37.4 ميجا)
+   والمجموع ≈ 54.8 ميجا.
+2. قسم `vendor_boot` نفسه 64 ميجا، ومنها ~17.35 ميجا لـ platform + 0.42 ميجا
+   للـ DTB + حصة avbtool + الجدول وbootconfig.
+
+`make-vendor-boot.sh` يقيس الاثنين ويفشل برسالة واضحة قبل أن تصل صورة سيئة إلى
+الهاتف. لا توقّع الصورة بمفتاح: الصورة الأصلية `algorithm NONE` والعيب الحقيقي
+في التوقيع بمفتاح اختبار أن شكله مختلف (2112 بايت بدل 704).
+
+### الإصدارات الأربعة
+
+زوج **HOS** من `prebuilt/vendor_ramdisk00`، وزوج **AOSP** من
+`prebuilt/aosp/vendor_ramdisk00` (يُستورد بـ`tools/import-aosp-vendor-boot.sh`
+من `vendor_boot.img` الخاص بالروم — لا يُخلطان أبداً)، ولكل زوج نسخة AVB
+مفعّلة وأخرى معطّلة (تجريد `avb`/`avb_keys` من first-stage fstab فقط، بلا أي
+تجاوز في bootconfig).
 
 ## المحتويات
 
@@ -63,7 +78,8 @@ device/xiaomi/rodin/
     ├── vendor_boot_tool.py     parse/rebuild/استخراج ramdisks (مُجرَّب round-trip)
     ├── vendor_ramdisk.py       فكّ lz4 + قراءة cpio ببايثون خالص (بدون tools)
     ├── collect-blobs.sh        جمع الـ blobs + الوحدات (+ --check)
-    └── make-vendor-boot.sh     تجميع + توقيع + حماية الحجم
+    ├── import-aosp-vendor-boot.sh  استيراد platform الـ AOSP + bootconfig من روم
+    └── make-vendor-boot.sh     تجميع أربع صور (HOS/AOSP × AVB) + حماية الحجم
 .github/workflows/pbrp-build.yml  البناء السحابي
 bash tools/setup-swap.sh         swap للـ CI
 docs/                             ملاحظات rodin + البناء والفلاش

@@ -41,11 +41,21 @@ they belong to different kernels.
 | File | Size (global MIXM package dump) | What it is |
 |---|---|---|
 | `kernel` | 17,184,688 | Kernel from `boot.img` of the *previous* revision (lz4 legacy, kernel 6.6.89). Nothing in the build packs it — treat it as historical, and refresh it from a dump if you need it for tooling. |
-| `vendor_ramdisk00` | 29,241,054 | The stock **platform** vendor ramdisk (first-stage init + 244 MediaTek modules for kernel 6.6.118). Pruned and packed into the new vendor_boot; never rebuilt from source. |
+| `vendor_ramdisk00` | 29,241,054 | The stock **platform** vendor ramdisk (first-stage init + 244 MediaTek modules for kernel 6.6.118). Kept verbatim and only recompressed with `zstd -19` (~17.35 MB); never rebuilt from source and never pruned. |
 | `dtb/mt6899-rodin.dtb` | 444,841 | Bare device tree (FDT) for this board. `BOARD_PREBUILT_DTBIMAGE_DIR` points here. |
 | `dtb/mt6899-rodin.dtb.mtk-wrapped` | 444,905 | Same DTB with MediaTek's 64-byte wrapper, kept for comparison. |
 | `vendor_boot_stock.img` | 67,108,864 | Untouched stock `vendor_boot`. **This is the rollback image** — never delete it. |
 | `modules/*.ko` | — | Optional. Recovery-only kernel modules (touch/haptics). The seven files here are built for kernel `6.6.89`, so they cannot load on a `6.6.118` device. See below. |
+
+## Which PROFILE are these from? (HOS vs AOSP)
+
+`prebuilt/vendor_ramdisk00` and `prebuilt/vendor_boot_stock.img` are the **HOS**
+(HyperOS/OEM) platform. The AOSP release pair never reuses them: an AOSP ROM
+ships its own platform ramdisk and bootconfig, imported into `prebuilt/aosp/`
+with `tools/import-aosp-vendor-boot.sh <rom vendor_boot.img>`. That directory is
+deliberately not committed — it only exists once a real ROM image has been
+imported, and `make-vendor-boot.sh` skips the AOSP pair (loudly) when it is
+missing instead of building it from the wrong bytes.
 
 ## Regenerating
 
