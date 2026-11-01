@@ -20,6 +20,8 @@ Usage
     vendor_boot_tool.py rebuild stock_vendor_boot.img new.img \
         --platform prebuilt/vendor_ramdisk00 --dtb prebuilt/dtb/mt6899-rodin.dtb \
         --size 67108864
+    vendor_boot_tool.py avb-prop stock_vendor_boot.img \
+        com.android.build.vendor_boot.fingerprint
 
 `rebuild` without --recovery reproduces the source byte for byte (this is the
 self-test used by tools/verify-tree.sh).
@@ -50,6 +52,47 @@ import sys
 PAGE_ALIGN = 4096
 DTB_MAGIC = b"\xd0\x0d\xfe\xed"
 TYPE_NAMES = {0: "none", 1: "platform", 2: "recovery", 3: "dlkm"}
+AVB_FOOTER_MAGIC = b"AVBf"
+AVB_VBMETA_MAGIC = b"AVB0"
+AVB_DESCRIPTOR_PROPERTY = 0
+
+
+def avb_property(path, key):
+    """Return one property from the AVB hash footer of a vendor_boot image.
+
+    The stock footer carries com.android.build.vendor_boot.fingerprint, the
+    fingerprint of the firmware the platform fragment was taken from. The
+    builder reuses that value instead of the PBRP build's own fingerprint:
+    this tree builds as a Chinese revision while the prebuilt platform, the
+    DTB and the vbmeta chain on the device are the global one, and an image
+    must not mix the two.
+    """
+    with open(path, "rb") as fh:
+        data = fh.read()
+    if len(data) < 256 or data[-64:-60] != AVB_FOOTER_MAGIC:
+        return None
+    vbmeta_offset, vbmeta_size = struct.unpack_from(">QQ", data, len(data) - 44)
+    vbmeta = data[vbmeta_offset:vbmeta_offset + vbmeta_size]
+    if vbmeta[:4] != AVB_VBMETA_MAGIC:
+        return None
+    auth_size, = struct.unpack_from(">Q", vbmeta, 12)
+    desc_offset, desc_size = struct.unpack_from(">QQ", vbmeta, 96)
+    pos = 256 + auth_size + desc_offset
+    end = pos + desc_size
+    while pos + 16 <= end:
+        tag, = struct.unpack_from(">Q", vbmeta, pos)
+        length, = struct.unpack_from(">Q", vbmeta, pos + 8)
+        body = pos + 16
+        if tag == AVB_DESCRIPTOR_PROPERTY:
+            key_size, value_size = struct.unpack_from(">QQ", vbmeta, body)
+            name = vbmeta[body + 16:body + 16 + key_size].decode("utf-8", "replace")
+            if name == key:
+                # A NUL separates the key from the value (AvbPropertyDescriptor).
+                value = vbmeta[body + 17 + key_size:
+                               body + 17 + key_size + value_size]
+                return value.decode("utf-8", "replace")
+        pos += 16 + length
+    return None
 
 
 def align(value, page):
@@ -209,6 +252,11 @@ def main():
     info = sub.add_parser("info", help="print the layout of an image")
     info.add_argument("image")
 
+    prop = sub.add_parser("avb-prop",
+                          help="print a property from the AVB footer of an image")
+    prop.add_argument("image")
+    prop.add_argument("key")
+
     dump = sub.add_parser("extract-ramdisk",
                           help="write one vendor ramdisk out of the image")
     dump.add_argument("image")
@@ -237,6 +285,15 @@ def main():
                               "file (the text mkbootimg --vendor_bootconfig takes)")
 
     args = parser.parse_args()
+
+    # Answered straight from the footer, before the image layout is printed:
+    # the builder captures this on stdout.
+    if args.command == "avb-prop":
+        value = avb_property(args.image, args.key)
+        if value is None:
+            sys.exit(1)
+        print(value)
+        return 0
 
     image = VendorBoot(args.image)
     image.describe()

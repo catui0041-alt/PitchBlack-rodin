@@ -227,6 +227,28 @@ pack_recovery() {
     printf '   packed from %s: %s bytes\n' "${RECOVERY_ROOT#${PRODUCT_OUT}/}" "$(stat -c %s "$1")"
 }
 
+# strip_platform_owned <root> <platform blob>
+# The two vendor ramdisks are one concatenated archive, so a path in the
+# recovery fragment replaces the platform's copy of it. Stock recovery is
+# built so that this never changes anything: it carries no system/bin/init at
+# all, and its sepolicy and plat_file_contexts are byte-identical to the
+# platform's. PBRP's fragment instead carries an Android 14 system/bin/init,
+# sepolicy and contexts over an Android 15 platform, so removing exactly the
+# paths the platform owns makes the result behave like stock. Used by the
+# diagnostics ladder, not by the release yet.
+strip_platform_owned() {
+    local root="$1" blob="$2" list="${WORK}/platform-members.txt" p n=0
+    lz4 -d -f "${blob}" "${WORK}/platform-for-strip.cpio" >/dev/null
+    cpio -it --quiet < "${WORK}/platform-for-strip.cpio" | sed 's#^\./##' > "${list}"
+    while IFS= read -r p; do
+        [[ -n "${p}" ]] || continue
+        [[ -f "${root}/${p}" || -L "${root}/${p}" ]] || continue
+        rm -f "${root}/${p}"
+        n=$((n + 1))
+    done < "${list}"
+    printf '   dropped %s path(s) the platform fragment already provides\n' "${n}"
+}
+
 echo "== packing the recovery fragment"
 pack_recovery "${WORK}/recovery.lz4"
 RECOVERY_SIZE="$(stat -c %s "${WORK}/recovery.lz4")"
@@ -365,11 +387,23 @@ build_image() {
         # only ever accepted that shape. A test-key signature is a different
         # 2112-byte vbmeta with a public key the device does not know.
         #
-        # The fingerprint property is what the stock image also carries; some
-        # vendor boot handlers compare it against the running build.
+        # The fingerprint property is the one the stock image carries. It is
+        # read back out of the stock footer instead of from this build: the
+        # PBRP tree builds as Redmi/rodin/rodin:...OS3.0.303.0.WOJCNXM (a
+        # Chinese revision) while the platform fragment, the DTB and the
+        # vbmeta chain on the device are the global OS3.0.302.0.WOJMIXM ones.
+        # Copying the firmware's own value keeps an image from mixing regions,
+        # which is the one thing that must never happen here.
+        local fingerprint=""
         local -a avb_args=()
-        if [[ -s "${PRODUCT_OUT}/build_fingerprint.txt" ]]; then
-            avb_args+=(--prop "com.android.build.vendor_boot.fingerprint:$(cat "${PRODUCT_OUT}/build_fingerprint.txt")")
+        fingerprint="$(python3 "${SCRIPT_DIR}/vendor_boot_tool.py" avb-prop \
+            "${stock}" com.android.build.vendor_boot.fingerprint 2>/dev/null || true)"
+        if [[ -z "${fingerprint}" && -s "${PRODUCT_OUT}/build_fingerprint.txt" ]]; then
+            fingerprint="$(cat "${PRODUCT_OUT}/build_fingerprint.txt")"
+        fi
+        if [[ -n "${fingerprint}" ]]; then
+            printf '   AVB fingerprint: %s\n' "${fingerprint}"
+            avb_args+=(--prop "com.android.build.vendor_boot.fingerprint:${fingerprint}")
         fi
         "${AVBTOOL}" add_hash_footer \
             --image "${WORK}/vendor_boot.img" \
@@ -424,7 +458,7 @@ if (( WANT_HOS )); then
 fi
 
 # ------------------------------------------------ diagnostics for the hardware
-# Three extra images, each differing from the release in one variable, so a hang
+# Five extra images, each differing from the release in one variable, so a hang
 # on a real device can be attributed instead of guessed at:
 #
 #   DIAG-CONTROL-stock
@@ -437,8 +471,17 @@ fi
 #       the stock LZ4 platform fragment kept untouched + the PBRP recovery
 #       fragment recompressed with zstd. If this hangs, the PBRP fragment is
 #       the cause; if it boots, the zstd platform is.
+#   DIAG-STOCKPLATFORM-PBRP-CLEAN
+#       the same pair, but every path the platform fragment already provides
+#       (system/bin/init, sepolicy, the *_contexts files, ...) is removed from
+#       the recovery fragment first, which is how the stock recovery fragment
+#       is arranged. If PBRP hangs and this boots, the override is the cause.
+#   DIAG-ZSTD-PBRP-CLEAN
+#       the release shape with the cleaned fragment: zstd platform + cleaned
+#       recovery. This is what a release would look like if the override is the
+#       cause, so it is the fourth hardware test and the candidate to ship.
 #
-# The recovery fragment has to be repacked for the third image because the
+# The recovery fragment has to be repacked for the last three images because the
 # stock platform (29.2 MB) plus the LZ4 recovery fragment (37.4 MB) no longer
 # fits the 62 MB ceiling. Zstandard is supported by the same kernel
 # (CONFIG_RD_ZSTD=y) and the recovery fragment is the only archive that is
@@ -463,6 +506,26 @@ if (( WANT_HOS && DIAGNOSTICS )); then
     build_image "${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP.img" \
         "${STOCK_IMAGE}" "${PLATFORM_RAMDISK}" "${WORK}/recovery.zst" ""
     built+=("${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP.img")
+
+    # Fourth image: same fragments, but the recovery fragment carries only what
+    # the platform does not, so init, sepolicy and the contexts come from the
+    # firmware exactly as they do with the stock recovery fragment. The trim
+    # above still applies; this image only removes the override.
+    rm -rf "${WORK}/recovery-clean"
+    cp -a "${RECOVERY_ROOT}" "${WORK}/recovery-clean"
+    strip_platform_owned "${WORK}/recovery-clean" "${PLATFORM_RAMDISK}"
+    "${MKBOOTFS}" "${WORK}/recovery-clean" | zstd -19 -T1 -q -f -o "${WORK}/recovery-clean.zst"
+    printf '   cleaned recovery packed: %s bytes\n' "$(stat -c %s "${WORK}/recovery-clean.zst")"
+    build_image "${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP-CLEAN.img" \
+        "${STOCK_IMAGE}" "${PLATFORM_RAMDISK}" "${WORK}/recovery-clean.zst" ""
+    built+=("${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP-CLEAN.img")
+
+    # Fifth image: the shape the release would take if the override is the
+    # cause -- our zstd platform plus the cleaned recovery fragment. Test it
+    # only after images 2 and 4 have both booted.
+    build_image "${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-ZSTD-PBRP-CLEAN.img" \
+        "${STOCK_IMAGE}" "${WORK}/platform-HOS-AVB-ENABLED" "${WORK}/recovery-clean.zst" ""
+    built+=("${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-ZSTD-PBRP-CLEAN.img")
 fi
 
 if (( WANT_AOSP )); then

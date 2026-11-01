@@ -75,6 +75,13 @@ while IFS= read -r py; do
 done < <(find "${REPO_DIR}/device" "${REPO_DIR}/tools" -name '*.py' -type f)
 
 note "make logic: does device.mk reference real files?"
+# device.mk sets DEVICE_PATH := device/xiaomi/rodin, a path relative to the
+# source root, exactly like every AOSP device tree; a real build runs make from
+# that root. Run the harness from the repo root too, otherwise this check passes
+# locally (where the cwd happens to be the repo) and fails on the runner, whose
+# workspace holds the checkout under device-tree/ instead. The harness prints
+# the copy sources with $(abspath) for the same reason: the checks below run in
+# the caller's shell, not in make's working directory.
 HARNESS="$(mktemp -d)"
 trap 'rm -rf "${HARNESS}"' EXIT
 cat > "${HARNESS}/harness.mk" <<MAKE
@@ -84,7 +91,7 @@ PRODUCT_PACKAGES :=
 PRODUCT_PACKAGES_DEBUG :=
 include \$(DEVICE_PATH)/device.mk
 all:
-	@echo \$(foreach c,\$(PRODUCT_COPY_FILES),\$(firstword \$(subst :, ,\$(c))))
+	@echo \$(foreach c,\$(PRODUCT_COPY_FILES),\$(abspath \$(firstword \$(subst :, ,\$(c)))))
 dests:
 	@echo \$(foreach c,\$(PRODUCT_COPY_FILES),\$(lastword \$(subst :, ,\$(c))))
 MAKE
@@ -92,7 +99,7 @@ MAKE
 if ! command -v make >/dev/null 2>&1; then
     fail "make is not installed, cannot check device.mk copy rules"
 else
-    sources="$(make -s -f "${HARNESS}/harness.mk" all 2>/dev/null)"
+    sources="$(make -s -C "${REPO_DIR}" -f "${HARNESS}/harness.mk" all 2>/dev/null)"
     if [[ -z "${sources}" ]]; then
         fail "device.mk produced no PRODUCT_COPY_FILES at all"
     else
@@ -130,7 +137,7 @@ else
             dir="${img_var##*:}"
             grep -qE "^[[:space:]]*${var}[[:space:]]*:=" "${DEVICE_DIR}/BoardConfig.mk" || symlinked="${symlinked} ${dir}/"
         done
-        dests="$(make -s -f "${HARNESS}/harness.mk" dests 2>/dev/null)"
+        dests="$(make -s -C "${REPO_DIR}" -f "${HARNESS}/harness.mk" dests 2>/dev/null)"
         bad_dest=""
         for d in ${dests}; do
             for p in ${symlinked}; do
@@ -176,7 +183,7 @@ else
     mkdir -p "$(dirname "${dummy_blob}")" "$(dirname "${dummy_module}")"
     : > "${dummy_blob}"
     : > "${dummy_module}"
-    with_dummies="$(make -s -f "${HARNESS}/harness.mk" all 2>/dev/null)"
+    with_dummies="$(make -s -C "${REPO_DIR}" -f "${HARNESS}/harness.mk" all 2>/dev/null)"
     if grep -q "tee-supplicant" <<< "${with_dummies}"; then
         pass "wildcard blob rule picks up a present blob"
     else
@@ -195,7 +202,7 @@ else
     rm -f "${dummy_blob}" "${dummy_module}"
     if [[ -n "${blob_backup}" ]]; then cp -p "${blob_backup}" "${dummy_blob}"; fi
     if [[ -n "${module_backup}" ]]; then cp -p "${module_backup}" "${dummy_module}"; fi
-    without_dummies="$(make -s -f "${HARNESS}/harness.mk" all 2>/dev/null)"
+    without_dummies="$(make -s -C "${REPO_DIR}" -f "${HARNESS}/harness.mk" all 2>/dev/null)"
     if [[ "${without_dummies}" == "${sources}" ]]; then
         pass "removing the dummies restores the original copy list"
     else
@@ -764,6 +771,36 @@ else
     else
         echo "  skip  copy list unavailable, bin/ exec bits unchecked"
     fi
+fi
+
+note "AVB fingerprint and region"
+# The footer property names the firmware the platform fragment came from. The
+# build's own fingerprint is not the same thing: this tree builds as a Chinese
+# revision, while the prebuilt platform, the DTB and the vbmeta chain on the
+# device are the global OS3.0.302.0.WOJMIXM dump. The packer therefore copies
+# the stock value instead of the build's, so an image can never mix regions.
+if grep -q 'vendor_boot_tool.py" avb-prop' "${boot_script}" &&
+   grep -q 'com.android.build.vendor_boot.fingerprint' "${boot_script}"; then
+    pass "make-vendor-boot.sh copies the AVB fingerprint out of the stock footer"
+else
+    fail "make-vendor-boot.sh no longer reads the AVB fingerprint from the stock image"
+fi
+if [[ -s "${stock_image}" ]] &&
+   python3 "${boot_tool}" avb-prop "${stock_image}" \
+       com.android.build.vendor_boot.fingerprint > "${HARNESS}/stock-fingerprint" 2>/dev/null; then
+    stock_fp="$(cat "${HARNESS}/stock-fingerprint")"
+    if [[ "${stock_fp}" == *WOJMIXM* ]]; then
+        pass "the stock footer names the global dump (…${stock_fp: -24})"
+    else
+        fail "the stock prebuilt is not the global MIXM image: ${stock_fp}"
+    fi
+    if grep -vE '^[[:space:]]*#' "${DEVICE_DIR}/pb_rodin.mk" 2>/dev/null | grep -q 'WOJCNXM'; then
+        fail "pb_rodin.mk still names the Chinese WOJCNXM revision while the prebuilts are global"
+    else
+        pass "the product fingerprint does not name a different region than the prebuilts"
+    fi
+else
+    echo "  skip  no stock image with an AVB footer, cannot read its fingerprint"
 fi
 
 note "summary"

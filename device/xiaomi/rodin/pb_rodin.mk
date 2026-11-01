@@ -21,8 +21,14 @@ PRODUCT_GMS_CLIENTID_BASE := android-xiaomi
 # raise it only if the branch allows it.
 PRODUCT_SHIPPING_API_LEVEL := 34
 
-BUILD_FINGERPRINT := Redmi/rodin/rodin:15/AP3A.240905.015.A2/OS3.0.303.0.WOJCNXM:user/release-keys
-PRIVATE_BUILD_DESC := miodm_rodin-user 15 AP3A.240905.015.A2 OS3.0.303.0.WOJCNXM release-keys
+# The recovery has to describe the firmware the device actually runs. This
+# tree is built against the global OS3.0.302.0.WOJMIXM dump: its prebuilt
+# platform ramdisk, DTB and vbmeta chain are that revision (see
+# prebuilt/README.md). The product fingerprint used to name the Chinese
+# OS3.0.303.0.WOJCNXM revision, which put a foreign region token into every
+# image; it now matches the dump the prebuilts come from.
+BUILD_FINGERPRINT := POCO/rodin_global/rodin:15/AP3A.240905.015.A2/OS3.0.302.0.WOJMIXM:user/release-keys
+PRIVATE_BUILD_DESC := rodin_global-user 15 AP3A.240905.015.A2 OS3.0.302.0.WOJMIXM release-keys
 
 PRODUCT_BUILD_PROP_OVERRIDES += \
     TARGET_DEVICE=rodin \

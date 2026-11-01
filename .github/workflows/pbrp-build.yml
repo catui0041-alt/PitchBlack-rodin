@@ -384,11 +384,13 @@ jobs:
             echo "       use vendor_boot_b if current-slot says b"
             if [ "${{ inputs.diagnostics }}" = "true" ]; then
               echo ""
-              echo "Diagnostics (flash one at a time, then try a normal reboot and"
-              echo "'fastboot reboot recovery'):"
-              echo "  vendor_boot-rodin-DIAG-CONTROL-stock.img          stock, byte for byte"
-              echo "  vendor_boot-rodin-DIAG-ZSTD-STOCKRECOVERY.img     zstd platform + stock recovery"
-              echo "  vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP.img     stock platform + PBRP recovery"
+              echo "Diagnostics (flash one at a time in this order, and write down"
+              echo "which one hangs; use the slot fastboot getvar current-slot reports):"
+              echo "  1. vendor_boot-rodin-DIAG-CONTROL-stock.img              stock, byte for byte"
+              echo "  2. vendor_boot-rodin-DIAG-ZSTD-STOCKRECOVERY.img         zstd platform + stock recovery"
+              echo "  3. vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP.img         stock platform + PBRP recovery"
+              echo "  4. vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP-CLEAN.img   same, minus platform-owned files"
+              echo "  5. vendor_boot-rodin-DIAG-ZSTD-PBRP-CLEAN.img           zstd platform + cleaned recovery"
             fi
             echo "This is an unofficial build of the PitchBlack Recovery Project."
           } > "$GITHUB_WORKSPACE/artifacts/build-info.md"
