@@ -36,6 +36,7 @@
 #   device/xiaomi/rodin/tools/make-vendor-boot.sh [--out-dir DIR]
 #                                                 [--profile hos|aosp|all]
 #                                                 [--no-avb]
+#                                                 [--diagnostics]
 #
 set -euo pipefail
 
@@ -69,12 +70,14 @@ DTB="${DEVICE_DIR}/prebuilt/dtb/mt6899-rodin.dtb"
 OUT_DIR_IMAGES="${PRODUCT_OUT}"
 PROFILE=all
 SIGN=1
+DIAGNOSTICS=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --out-dir) OUT_DIR_IMAGES="$2"; shift 2 ;;
         --profile) PROFILE="$2"; shift 2 ;;
         --no-avb) SIGN=0; shift ;;
+        --diagnostics) DIAGNOSTICS=1; shift ;;
         -h|--help) sed -n '3,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -412,7 +415,6 @@ build_profile() {
 }
 
 cp -f "${WORK}/recovery.lz4" "${WORK}/recovery-AVB-ENABLED.lz4"
-
 # HOS: the firmware's platform fragment, recompressed as zstd. Kept as LZ4 it
 # leaves no room for a PBRP-sized recovery fragment; zstd -19 turns the same
 # 72,030,720-byte cpio into ~17 MB without changing one byte of content, and
@@ -420,6 +422,49 @@ cp -f "${WORK}/recovery.lz4" "${WORK}/recovery-AVB-ENABLED.lz4"
 if (( WANT_HOS )); then
     build_profile HOS "${STOCK_IMAGE}" "${PLATFORM_RAMDISK}" "" "AVB-ENABLED" zstd 0
 fi
+
+# ------------------------------------------------ diagnostics for the hardware
+# Three extra images, each differing from the release in one variable, so a hang
+# on a real device can be attributed instead of guessed at:
+#
+#   DIAG-CONTROL-stock
+#       the stock image, byte for byte. If this hangs, the flash command, the
+#       slot or the partition name is wrong -- not the build.
+#   DIAG-ZSTD-STOCKRECOVERY
+#       our zstd platform fragment + the *stock* recovery fragment. If this
+#       hangs, the platform recompression (or the vbmeta shape) is the cause.
+#   DIAG-STOCKPLATFORM-PBRP
+#       the stock LZ4 platform fragment kept untouched + the PBRP recovery
+#       fragment recompressed with zstd. If this hangs, the PBRP fragment is
+#       the cause; if it boots, the zstd platform is.
+#
+# The recovery fragment has to be repacked for the third image because the
+# stock platform (29.2 MB) plus the LZ4 recovery fragment (37.4 MB) no longer
+# fits the 62 MB ceiling. Zstandard is supported by the same kernel
+# (CONFIG_RD_ZSTD=y) and the recovery fragment is the only archive that is
+# recompressed; the platform stays byte for byte as the firmware ships it.
+if (( WANT_HOS && DIAGNOSTICS )); then
+    echo "== diagnostics"
+    control="${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-CONTROL-stock.img"
+    cp -f "${STOCK_IMAGE}" "${control}"
+    ( cd "${OUT_DIR_IMAGES}" && sha256sum "$(basename "${control}")" > "$(basename "${control}").sha256" )
+    built+=("${control}")
+    echo "   -> ${control} (copy of the stock image)"
+
+    stock_recovery="${WORK}/stock-recovery.lz4"
+    python3 "${SCRIPT_DIR}/vendor_boot_tool.py" extract-ramdisk "${STOCK_IMAGE}" \
+        --type 2 --out "${stock_recovery}" >/dev/null
+    build_image "${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-ZSTD-STOCKRECOVERY.img" \
+        "${STOCK_IMAGE}" "${WORK}/platform-HOS-AVB-ENABLED" "${stock_recovery}" ""
+    built+=("${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-ZSTD-STOCKRECOVERY.img")
+
+    lz4 -d -f "${WORK}/recovery.lz4" "${WORK}/recovery.cpio" >/dev/null
+    zstd -19 -T1 -q -f "${WORK}/recovery.cpio" -o "${WORK}/recovery.zst"
+    build_image "${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP.img" \
+        "${STOCK_IMAGE}" "${PLATFORM_RAMDISK}" "${WORK}/recovery.zst" ""
+    built+=("${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP.img")
+fi
+
 if (( WANT_AOSP )); then
     stock="${STOCK_IMAGE}"
     if [[ -f "${AOSP_STOCK_IMAGE}" ]]; then stock="${AOSP_STOCK_IMAGE}"; fi

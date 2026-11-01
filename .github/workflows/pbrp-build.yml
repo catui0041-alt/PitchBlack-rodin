@@ -34,6 +34,13 @@ on:
         required: false
         default: ""
         type: string
+      diagnostics:
+        description: >
+          Also emit two isolation images: a byte-for-byte copy of the stock
+          vendor_boot, and our zstd platform with the stock recovery fragment.
+        required: false
+        default: false
+        type: boolean
   push:
     branches: [main]
     paths-ignore:
@@ -120,6 +127,17 @@ jobs:
           [ "${missing}" -eq 0 ]
           test "$(stat -c %s "$tree/device/xiaomi/rodin/prebuilt/vendor_boot_stock.img")" -eq 67108864
           echo "prebuilts present"
+
+      - name: Verify the device tree is self-consistent
+        shell: bash
+        run: |
+          set -euo pipefail
+          # About two minutes, and it catches the mistakes that otherwise only
+          # surface after the 70-minute compile: a recovery file that shadows
+          # the platform fragment, a tool that no longer parses, a script that
+          # lost its exec bit. The first cloud build compiled for 68 minutes and
+          # then died here, so run the same checks up front.
+          bash "$GITHUB_WORKSPACE/device-tree/tools/verify-tree.sh"
 
       - name: Set up build swap
         shell: bash
@@ -296,6 +314,7 @@ jobs:
           # stock fstab. No bootconfig override is written for either.
           flags=""
           if [ "${{ inputs.sign_image }}" = "false" ]; then flags="--no-avb"; fi
+          if [ "${{ inputs.diagnostics }}" = "true" ]; then flags="$flags --diagnostics"; fi
           # Run it through bash rather than executing it: the device tree is
           # committed from phones, where the filesystem has no executable bit
           # to commit, and a 0644 script fails here with exit code 126 after
@@ -359,7 +378,18 @@ jobs:
             echo "- PBRP branch: ${{ inputs.pbrp_branch || 'android-14.0' }}"
             echo "- run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo ""
-            echo "Flash: fastboot flash vendor_boot vendor_boot-rodin.img"
+            echo "Flash: fastboot getvar current-slot"
+            echo "       fastboot flash vendor_boot_a vendor_boot-rodin-HOS-AVB-ENABLED.img"
+            echo "       fastboot reboot        # (or 'fastboot reboot recovery')"
+            echo "       use vendor_boot_b if current-slot says b"
+            if [ "${{ inputs.diagnostics }}" = "true" ]; then
+              echo ""
+              echo "Diagnostics (flash one at a time, then try a normal reboot and"
+              echo "'fastboot reboot recovery'):"
+              echo "  vendor_boot-rodin-DIAG-CONTROL-stock.img          stock, byte for byte"
+              echo "  vendor_boot-rodin-DIAG-ZSTD-STOCKRECOVERY.img     zstd platform + stock recovery"
+              echo "  vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP.img     stock platform + PBRP recovery"
+            fi
             echo "This is an unofficial build of the PitchBlack Recovery Project."
           } > "$GITHUB_WORKSPACE/artifacts/build-info.md"
 
