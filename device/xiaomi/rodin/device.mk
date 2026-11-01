@@ -74,18 +74,22 @@ PRODUCT_COPY_FILES += \
 # first_stage_ramdisk fstab (used while the vendor ramdisk mounts partitions
 # before the recovery UI starts).
 #
-# Only fstab.emmc is installed from here, exactly like the stock recovery
-# fragment. fstab.mt6899 must NOT be installed: the recovery fragment is
-# concatenated after the platform fragment, so a copy here replaces the
-# firmware's own first-stage table for ro.hardware=mt6899. That table is what
-# carries mi_ext, the 25 product/system overlay mounts and the avb_keys list
-# for this HyperOS build; the trimmed tree copy dropped all of it and the
-# device sat on the POCO logo instead of booting. The platform fragment
-# already ships the real fstab.mt6899, and make-vendor-boot.sh refuses to
-# pack a recovery fragment that shadows it.
-ifneq ($(wildcard $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899),)
+# The file in the tree is named fstab.emmc, exactly like the one the stock
+# recovery fragment ships. It must NOT exist as fstab.mt6899: the recovery
+# fragment is concatenated after the platform fragment, so a copy there would
+# replace the firmware's own first-stage table for ro.hardware=mt6899. That
+# table is what carries mi_ext, the 25 product/system overlay mounts and the
+# avb_keys list for this HyperOS build; the trimmed tree copy dropped all of it
+# and the device sat on the POCO logo instead of booting. The platform fragment
+# already ships the real fstab.mt6899, and make-vendor-boot.sh refuses to pack a
+# recovery fragment that shadows it.
+#
+# The whole recovery/root directory is copied into the fragment by the build,
+# so the rename in the tree is what keeps the name out; this rule only pins the
+# destination explicitly.
+ifneq ($(wildcard $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.emmc),)
 PRODUCT_COPY_FILES += \
-    $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.mt6899:recovery/root/first_stage_ramdisk/fstab.emmc
+    $(DEVICE_PATH)/recovery/root/first_stage_ramdisk/fstab.emmc:recovery/root/first_stage_ramdisk/fstab.emmc
 endif
 
 # Empty on the stock ramdisk (0 bytes) but init expects the file to exist.

@@ -39,7 +39,7 @@ required=(
     "device/xiaomi/rodin/recovery/root/init.recovery.hardware.rc"
     "device/xiaomi/rodin/tools/vendor_ramdisk.py"
     "device/xiaomi/rodin/tools/collect-blobs.sh"
-    "device/xiaomi/rodin/recovery/root/first_stage_ramdisk/fstab.mt6899"
+    "device/xiaomi/rodin/recovery/root/first_stage_ramdisk/fstab.emmc"
     "device/xiaomi/rodin/proprietary/vendor-blobs.mk"
     "device/xiaomi/rodin/tools/extract-prebuilts.sh"
     "device/xiaomi/rodin/tools/vendor_boot_tool.py"
@@ -518,6 +518,14 @@ if grep -q 'recovery/root/first_stage_ramdisk/fstab.emmc' "${DEVICE_DIR}/device.
     pass "device.mk installs the tree fstab only as fstab.emmc"
 else
     fail "device.mk installs recovery/root/first_stage_ramdisk/fstab.mt6899, which shadows the HyperOS first-stage table"
+fi
+# The build copies recovery/root wholesale into the fragment, so the file may
+# not exist in the tree under the platform's name at all -- a PRODUCT_COPY_FILES
+# rule alone does not keep it out.
+if [[ ! -e "${DEVICE_DIR}/recovery/root/first_stage_ramdisk/fstab.mt6899" ]]; then
+    pass "the tree does not carry first_stage_ramdisk/fstab.mt6899"
+else
+    fail "recovery/root/first_stage_ramdisk/fstab.mt6899 exists; the build copies recovery/root into the fragment and it will shadow the platform table"
 fi
 if grep -q '^FORBIDDEN_RECOVERY_PATHS="' "${boot_script}" &&
    grep -q 'shadows' "${boot_script}" &&
