@@ -803,6 +803,24 @@ else
     echo "  skip  no stock image with an AVB footer, cannot read its fingerprint"
 fi
 
+note "diagnostics keep the recovery payload"
+# The platform fragment is also where the stock recovery lives, so a blind
+# "remove everything the platform owns" rule would replace PBRP's recovery with
+# the stock one in the two cleaned diagnostic images. The keep list has to name
+# the recovery payload and must not name system/bin/init, which is the whole
+# point of the cleanup.
+owned_paths="$(sed -n '/^RECOVERY_OWNED_PATHS="/,/^"$/p' "${boot_script}" | sed '1d;$d')"
+if [[ -z "${owned_paths}" ]]; then
+    fail "cannot read RECOVERY_OWNED_PATHS out of make-vendor-boot.sh"
+elif grep -qxF 'system/bin/recovery' <<< "${owned_paths}" &&
+     grep -qxF 'system/bin/init' <<< "${owned_paths}"; then
+    fail "the clean-image keep list keeps system/bin/init, so the cleanup would do nothing"
+elif ! grep -qxF 'system/bin/recovery' <<< "${owned_paths}"; then
+    fail "the clean-image keep list drops PBRP's own recovery binary"
+else
+    pass "the clean images keep the recovery payload but not system/bin/init"
+fi
+
 note "summary"
 printf 'checks: %d, failures: %d\n' "${CHECKS}" "${FAILURES}"
 if [[ "${FAILURES}" -gt 0 ]]; then

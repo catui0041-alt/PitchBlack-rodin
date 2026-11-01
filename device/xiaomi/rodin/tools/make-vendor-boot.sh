@@ -233,9 +233,46 @@ pack_recovery() {
 # built so that this never changes anything: it carries no system/bin/init at
 # all, and its sepolicy and plat_file_contexts are byte-identical to the
 # platform's. PBRP's fragment instead carries an Android 14 system/bin/init,
-# sepolicy and contexts over an Android 15 platform, so removing exactly the
-# paths the platform owns makes the result behave like stock. Used by the
-# diagnostics ladder, not by the release yet.
+# sepolicy, contexts, prop.default and linker over an Android 15 platform.
+# Removing the paths the platform owns makes the concatenation behave like
+# stock for first-stage init and for every process that runs during a normal
+# boot. Used by the diagnostics ladder, not by the release yet.
+#
+# The recovery payload itself is kept even where the platform ships a copy:
+# the platform fragment is also where the stock recovery lives (it carries
+# system/bin/recovery, fastbootd, adbd, toybox and the res/ images), so a blind
+# "platform wins" rule would replace PBRP with the stock recovery. Nothing in
+# this list is read during a normal boot: init only starts the recovery UI when
+# misc says boot-recovery.
+RECOVERY_OWNED_PATHS="
+init.recovery.*
+res/*
+twres/*
+sbin/*
+system/bin/recovery
+system/bin/adbd
+system/bin/fastbootd
+system/bin/toybox
+system/bin/busybox
+system/bin/keystore2
+system/bin/e2fsdroid
+system/bin/minadbd
+system/bin/load-touch-modules.sh
+system/etc/recovery.fstab
+system/etc/twrp.flags
+system/lib64/rodin-touch/*
+"
+
+recovery_owns() {
+    local path="$1" pattern
+    for pattern in ${RECOVERY_OWNED_PATHS}; do
+        case "${path}" in
+            ${pattern}) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 strip_platform_owned() {
     local root="$1" blob="$2" list="${WORK}/platform-members.txt" p n=0
     lz4 -d -f "${blob}" "${WORK}/platform-for-strip.cpio" >/dev/null
@@ -243,6 +280,7 @@ strip_platform_owned() {
     while IFS= read -r p; do
         [[ -n "${p}" ]] || continue
         [[ -f "${root}/${p}" || -L "${root}/${p}" ]] || continue
+        recovery_owns "${p}" && continue
         rm -f "${root}/${p}"
         n=$((n + 1))
     done < "${list}"
