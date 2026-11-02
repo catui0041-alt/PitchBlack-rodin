@@ -821,6 +821,19 @@ else
     pass "the clean images keep the recovery payload but not system/bin/init"
 fi
 
+note "private recovery runtime regression tests"
+if python3 -m unittest discover -s "${REPO_DIR}/tools/tests" -p 'test_recovery_runtime.py'; then
+    pass "private runtime staging and mixed-library rejection tests pass"
+else
+    fail "private runtime regression tests failed"
+fi
+if ! grep -qxF 'system/lib64/libprotobuf-cpp-lite.so' <<< "${trim_paths:-}" &&
+   grep -qxF 'system/lib64/libprotobuf-cpp-lite.so' <<< "${recovery_essentials:-}"; then
+    pass "the trim preserves PBRP's required protobuf library"
+else
+    fail "PBRP needs its own protobuf library; the trim may not replace it with stock"
+fi
+
 note "summary"
 printf 'checks: %d, failures: %d\n' "${CHECKS}" "${FAILURES}"
 if [[ "${FAILURES}" -gt 0 ]]; then

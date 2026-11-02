@@ -142,7 +142,6 @@ twres/fonts/OFL.txt
 system/bin/magiskboot
 system/bin/bash
 system/bin/nano
-system/lib64/libprotobuf-cpp-lite.so
 vendor/lib64/libclang_rt.ubsan_standalone-aarch64-android.so
 ramdisk-files.txt
 ramdisk-files.sha256sum
@@ -157,6 +156,7 @@ system/bin/fastbootd
 system/bin/keystore2
 system/bin/linker64
 system/lib64/libandroidicu.so
+system/lib64/libprotobuf-cpp-lite.so
 system/lib64/rodin-touch/libtensorflowlite_touch_c.so
 system/etc/recovery.fstab
 first_stage_ramdisk/fstab.emmc
@@ -564,6 +564,22 @@ if (( WANT_HOS && DIAGNOSTICS )); then
     build_image "${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-ZSTD-PBRP-CLEAN.img" \
         "${STOCK_IMAGE}" "${WORK}/platform-HOS-AVB-ENABLED" "${WORK}/recovery-clean.zst" ""
     built+=("${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-ZSTD-PBRP-CLEAN.img")
+
+    # CLEAN preserves PBRP binaries but replaces common Android 14 libraries
+    # with Android 15 ones. libfs_mgr changed fs_mgr_do_mount's ABI, and the
+    # stock libcutils no longer exports android_memset16/32. Isolate the PBRP
+    # libraries instead of asking a tester to discover a linker failure.
+    echo "== isolated recovery runtime (experimental)"
+    cp -a "${RECOVERY_ROOT}" "${WORK}/recovery-isolated"
+    python3 "${SCRIPT_DIR}/isolate-recovery-runtime.py" "${WORK}/recovery-isolated"
+    strip_platform_owned "${WORK}/recovery-isolated" "${PLATFORM_RAMDISK}"
+    python3 "${SCRIPT_DIR}/validate-recovery-runtime.py" \
+        --platform-cpio "${WORK}/platform-for-strip.cpio" \
+        --recovery-root "${WORK}/recovery-isolated"
+    "${MKBOOTFS}" "${WORK}/recovery-isolated" | zstd -19 -T1 -q -f -o "${WORK}/recovery-isolated.zst"
+    build_image "${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-ZSTD-PBRP-ISOLATED.img" \
+        "${STOCK_IMAGE}" "${WORK}/platform-HOS-AVB-ENABLED" "${WORK}/recovery-isolated.zst" ""
+    built+=("${OUT_DIR_IMAGES}/vendor_boot-rodin-DIAG-ZSTD-PBRP-ISOLATED.img")
 fi
 
 if (( WANT_AOSP )); then

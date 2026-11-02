@@ -36,8 +36,8 @@ on:
         type: string
       diagnostics:
         description: >
-          Also emit two isolation images: a byte-for-byte copy of the stock
-          vendor_boot, and our zstd platform with the stock recovery fragment.
+          Also emit the five isolation controls and the experimental PBRP
+          private-runtime candidate. No candidate is hardware-verified yet.
         required: false
         default: false
         type: boolean
@@ -314,7 +314,9 @@ jobs:
           # stock fstab. No bootconfig override is written for either.
           flags=""
           if [ "${{ inputs.sign_image }}" = "false" ]; then flags="--no-avb"; fi
-          if [ "${{ inputs.diagnostics }}" = "true" ]; then flags="$flags --diagnostics"; fi
+          # Push builds must include the candidate too; otherwise a successful
+          # build emits only the unchanged releases and never tests the fix.
+          if [ "${{ inputs.diagnostics || github.event_name == 'push' }}" = "true" ]; then flags="$flags --diagnostics"; fi
           # Run it through bash rather than executing it: the device tree is
           # committed from phones, where the filesystem has no executable bit
           # to commit, and a 0644 script fails here with exit code 126 after
@@ -362,6 +364,11 @@ jobs:
             verify_dir="$(mktemp -d)"
             cp -f "$image" "$verify_dir/vendor_boot.img"
             "$avbtool" verify_image --image "$verify_dir/vendor_boot.img"
+            candidate="$PBRP_TOP/out/target/product/rodin/vendor_boot-rodin-DIAG-ZSTD-PBRP-ISOLATED.img"
+            if [ -f "$candidate" ]; then
+              cp -f "$candidate" "$verify_dir/vendor_boot.img"
+              "$avbtool" verify_image --image "$verify_dir/vendor_boot.img"
+            fi
             rm -rf "$verify_dir"
           fi
 
@@ -378,19 +385,26 @@ jobs:
             echo "- PBRP branch: ${{ inputs.pbrp_branch || 'android-14.0' }}"
             echo "- run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo ""
+            echo "Experimental images: CI success does not prove hardware boot. Keep a matching stock rollback."
+            flash_image="vendor_boot-rodin-HOS-AVB-ENABLED.img"
+            if [ "${{ inputs.diagnostics || github.event_name == 'push' }}" = "true" ]; then
+              flash_image="vendor_boot-rodin-DIAG-ZSTD-PBRP-ISOLATED.img"
+            fi
             echo "Flash: fastboot getvar current-slot"
-            echo "       fastboot flash vendor_boot_a vendor_boot-rodin-HOS-AVB-ENABLED.img"
+            echo "       fastboot flash vendor_boot_a ${flash_image}"
             echo "       fastboot reboot        # (or 'fastboot reboot recovery')"
             echo "       use vendor_boot_b if current-slot says b"
-            if [ "${{ inputs.diagnostics }}" = "true" ]; then
+            if [ "${{ inputs.diagnostics || github.event_name == 'push' }}" = "true" ]; then
               echo ""
-              echo "Diagnostics (flash one at a time in this order, and write down"
-              echo "which one hangs; use the slot fastboot getvar current-slot reports):"
+              echo "Diagnostic controls (not a request to flash all of them):"
               echo "  1. vendor_boot-rodin-DIAG-CONTROL-stock.img              stock, byte for byte"
               echo "  2. vendor_boot-rodin-DIAG-ZSTD-STOCKRECOVERY.img         zstd platform + stock recovery"
               echo "  3. vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP.img         stock platform + PBRP recovery"
-              echo "  4. vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP-CLEAN.img   same, minus platform-owned files"
-              echo "  5. vendor_boot-rodin-DIAG-ZSTD-PBRP-CLEAN.img           zstd platform + cleaned recovery"
+              echo "  4. vendor_boot-rodin-DIAG-STOCKPLATFORM-PBRP-CLEAN.img   control only: known mixed-library ABI issue"
+              echo "  5. vendor_boot-rodin-DIAG-ZSTD-PBRP-CLEAN.img           control only: known mixed-library ABI issue"
+              echo "  Candidate: vendor_boot-rodin-DIAG-ZSTD-PBRP-ISOLATED.img"
+              echo "    Private PBRP libraries for recovery/adbd/fastbootd; stock first-stage runtime."
+              echo "    Do not repeat the controls blindly. Test one verified candidate with a matching stock rollback."
             fi
             echo "This is an unofficial build of the PitchBlack Recovery Project."
           } > "$GITHUB_WORKSPACE/artifacts/build-info.md"
