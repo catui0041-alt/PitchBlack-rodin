@@ -17,7 +17,7 @@ HEADROOM_GIB=2
 # Never let swap eat the disk the checkout and its output need: the build fails
 # on ENOSPC long after the OOM killer would have. On a standard runner with
 # ~55 GiB free the swap file has to stay small.
-MAX_SWAP_GIB="${MAX_SWAP_GIB:-10}"
+MAX_SWAP_GIB="${MAX_SWAP_GIB:-16}"
 DISK_RESERVE_GIB="${DISK_RESERVE_GIB:-30}"
 
 swap_kb="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
@@ -64,4 +64,12 @@ sudo chmod 600 "${SWAP_FILE}"
 sudo mkswap "${SWAP_FILE}" >/dev/null
 sudo swapon "${SWAP_FILE}"
 
+# The soong_build analysis phase peaks at ~14 GiB on a 15.6 GiB runner.
+# Default swappiness (60) waits too long before reclaiming anonymous pages;
+# by then the runner is thrashing and GitHub's hypervisor kills the VM.
+# Values above 100 (Linux 5.8+) aggressively prefer swapping over dropping
+# file cache, giving soong_build the headroom it needs.
+sudo sysctl -w vm.swappiness=180
+
 awk '/^SwapTotal:/ {printf "swap total now: %.1f GiB\n", $2 / 1024 / 1024}' /proc/meminfo
+

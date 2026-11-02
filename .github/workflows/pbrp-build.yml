@@ -143,7 +143,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MIN_SWAP_GIB=8 bash "$GITHUB_WORKSPACE/device-tree/tools/setup-swap.sh"
+          MIN_SWAP_GIB=14 bash "$GITHUB_WORKSPACE/device-tree/tools/setup-swap.sh"
           free -h
 
       - name: Check runner capacity
@@ -279,7 +279,7 @@ jobs:
           export NINJA_ARGS="-j${jobs} -l${jobs}"
           export SOONG_UI_NINJA_ARGS="$NINJA_ARGS"
           export NINJA_HIGHMEM_NUM_JOBS=1
-          ( while sleep 60; do date -u '+%Y-%m-%dT%H:%M:%SZ build heartbeat'; df -h "$GITHUB_WORKSPACE" | tail -1; free -h | head -2; done ) &
+          ( while sleep 60; do date -u '+%Y-%m-%dT%H:%M:%SZ build heartbeat'; df -h "$GITHUB_WORKSPACE" | tail -1; free -h; done ) &
           heartbeat=$!
           trap 'kill "$heartbeat" 2>/dev/null || true' EXIT
           set +u
